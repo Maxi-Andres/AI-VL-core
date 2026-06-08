@@ -1,5 +1,5 @@
-hacer que funcione mejor, inentar sacar el think, o que minimo lo imprima en la respuesta
-fijate que onda los max_tokens en que influjen
+hacer que funcione mejor, inentar sacar el think, o que minimo me imprima lo que va pensando
+fijate que onda los max_tokens en que influyen, si pongo ollama ps tienen un context, no se si eso influye
 
 me parece que hay que mejorar la propmt inicial, por que pone el think:
 [!] No devolvió JSON parseable.
