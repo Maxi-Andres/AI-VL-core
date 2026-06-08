@@ -3,131 +3,74 @@
 03_smoke_test.py — Validación rápida del VLM sobre una imagen del lab.
 
 Manda una imagen al endpoint OpenAI-compatible de Ollama (el mismo que va a
-consumir el Silk AI Proxy Gateway / F1.9) y pide identificar instrumentos
-industriales devolviendo JSON con bounding boxes.
+consumir el Silk AI Proxy Gateway / F1.9) y pide identificar objetos
+devolviendo JSON con bounding boxes.
+
+¿No querés escribir flags? Corré `python3 menu.py` (menú interactivo).
 
 Requisitos:  pip install requests
 Uso:
-    python3 03_smoke_test.py imagen_planta.jpg
-    python3 03_smoke_test.py imagen_planta.jpg --model qwen3-vl:4b
+    python3 03_smoke_test.py fotosClean/2.jpeg
+    python3 03_smoke_test.py fotosClean/2.jpeg --model qwen3-vl:8b
+    python3 03_smoke_test.py fotosClean/2.jpeg --scope todo --think
 """
 import argparse
-import base64
-import json
-import re
 import sys
-import time
 
 import requests
 
-OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
-
-# Prompt industrial en español rioplatense. Pedimos SOLO JSON para poder parsear.
-SYSTEM_PROMPT = (
-    "Sos un asistente de inspección industrial para minería y oil & gas. "
-    "Analizás imágenes de planta y respondés SIEMPRE en JSON válido, sin texto extra, "
-    "sin markdown, sin explicaciones."
-)
-
-USER_PROMPT = (
-    "Identificá manómetros, válvulas y EPP (elementos de protección personal) visibles "
-    "en la imagen. Para cada objeto devolvé un item con: "
-    '"tipo" (manometro|valvula|epp|otro), '
-    '"bbox" como [x_min, y_min, x_max, y_max] normalizado entre 0 y 1, '
-    '"lectura" (string con el valor del instrumento si es legible, o null), '
-    '"confianza" (0 a 1). '
-    'Respondé con un objeto JSON: {"objetos": [ ... ]}.'
+from vlm_common import (
+    OLLAMA_URL,
+    SCOPES,
+    encode_image,
+    load_config,
+    query_vlm,
+    render_result,
 )
 
 
-def encode_image(path: str) -> str:
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-def extract_json(text: str):
-    """Intenta parsear JSON aunque el modelo agregue ruido, fences o razonamiento."""
-    text = text.strip()
-    # quitar bloques de razonamiento <think>...</think> (modelos thinking)
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    # quitar fences ```json ... ```
-    text = re.sub(r"^```(?:json)?", "", text).strip()
-    text = re.sub(r"```$", "", text).strip()
+def run_smoke(image, model, scope="industrial", max_tokens=4096,
+              think=False, url=OLLAMA_URL):
+    """Corre el smoke test sobre una imagen e imprime el resultado."""
     try:
-        return json.loads(text), True
-    except json.JSONDecodeError:
-        # buscar el primer { ... } balanceado de forma simple
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if m:
-            try:
-                return json.loads(m.group(0)), True
-            except json.JSONDecodeError:
-                pass
-    return text, False
-
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("image", help="Ruta a la imagen del lab (jpg/png)")
-    ap.add_argument("--model", default="qwen3-vl:8b", help="Modelo de Ollama")
-    ap.add_argument("--url", default=OLLAMA_URL)
-    args = ap.parse_args()
-
-    try:
-        img_b64 = encode_image(args.image)
+        img_b64 = encode_image(image)
     except FileNotFoundError:
-        print(f"[ERROR] No encuentro la imagen: {args.image}", file=sys.stderr)
-        sys.exit(1)
+        print(f"[ERROR] No encuentro la imagen: {image}", file=sys.stderr)
+        return False
 
-    payload = {
-        "model": args.model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": USER_PROMPT},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
-                    },
-                ],
-            },
-        ],
-        "temperature": 0.1,
-        "max_tokens": 768,
-        # Modo JSON: fuerza al modelo a devolver SOLO JSON válido.
-        "response_format": {"type": "json_object"},
-    }
-
-    print(f"[..] Enviando '{args.image}' al modelo '{args.model}' ...")
-    t0 = time.perf_counter()
+    print(f"[..] Enviando '{image}' al modelo '{model}' (modo: {scope}) ...")
     try:
-        r = requests.post(args.url, json=payload, timeout=120)
-        r.raise_for_status()
+        res = query_vlm(img_b64, model, scope=scope, max_tokens=max_tokens,
+                        think=think, url=url, timeout=120)
     except requests.RequestException as e:
         print(f"[ERROR] Falló la request a Ollama: {e}", file=sys.stderr)
         print("        ¿Está corriendo el servicio? curl http://localhost:11434/api/version")
-        sys.exit(1)
-    elapsed = time.perf_counter() - t0
+        return False
 
-    data = r.json()
-    content = data["choices"][0]["message"]["content"]
+    render_result(model, res)
+    return True
 
-    parsed, ok = extract_json(content)
-    print("\n========== RESULTADO ==========")
-    print(f"Modelo:        {args.model}")
-    print(f"Latencia E2E:  {elapsed:.2f} s")
-    print(f"JSON válido:   {'SÍ' if ok else 'NO'}")
-    print("-------------------------------")
-    if ok:
-        print(json.dumps(parsed, indent=2, ensure_ascii=False))
-        n = len(parsed.get("objetos", [])) if isinstance(parsed, dict) else 0
-        print(f"\n[OK] Objetos detectados: {n}")
-    else:
-        print("[!] No devolvió JSON parseable. Respuesta cruda:")
-        print(content)
-    print("===============================")
+
+def main():
+    cfg = load_config()  # los defaults salen de config.json
+    ap = argparse.ArgumentParser(description="Smoke test del VLM sobre una imagen.")
+    ap.add_argument("image", nargs="?", default=cfg["image"],
+                    help="Ruta a la imagen (jpg/png). Default: el de config.json")
+    ap.add_argument("--model", default=cfg["model"],
+                    help="Modelo de Ollama (4b entra 100%% en 8GB de VRAM; "
+                         "el 8b se parte CPU/GPU y es ~3x más lento)")
+    ap.add_argument("--scope", choices=list(SCOPES), default=cfg["scope"],
+                    help="Modo de detección: industrial (solo instrumentos) | todo (cualquier objeto)")
+    ap.add_argument("--url", default=cfg["url"])
+    ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
+                    help="Tope de tokens de salida (incluye razonamiento)")
+    ap.add_argument("--think", action="store_true", default=cfg["think"],
+                    help="Permitir razonamiento del modelo (más lento; por defecto desactivado)")
+    args = ap.parse_args()
+
+    ok = run_smoke(args.image, args.model, scope=args.scope,
+                   max_tokens=args.max_tokens, think=args.think, url=args.url)
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

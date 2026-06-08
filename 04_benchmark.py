@@ -2,91 +2,36 @@
 """
 04_benchmark.py — Benchmark de latencia (P50/P95) y tasa de JSON válido.
 
-Corre el mismo prompt industrial sobre todas las imágenes de una carpeta,
-N veces por imagen, contra uno o varios modelos. Sirve para comparar
-qwen3-vl:8b vs qwen3-vl:4b vs qwen2.5vl:7b con datos reales del lab y
-decidir el VLM primario del PoC (criterios F1.8: precisión, latencia P95,
-tasa de JSON válido para el contrato VLM->VLA).
+Corre el mismo prompt sobre todas las imágenes de una carpeta, N veces por
+imagen, contra uno o varios modelos. Sirve para comparar qwen3-vl:8b vs
+qwen3-vl:4b vs qwen2.5vl:7b con datos reales del lab y decidir el VLM primario
+del PoC (criterios F1.8: precisión, latencia P95, tasa de JSON válido VLM->VLA).
+
+¿No querés escribir flags? Corré `python3 menu.py` (menú interactivo).
 
 Requisitos:  pip install requests
 Uso:
-    python3 04_benchmark.py ./imagenes_lab --runs 3
-    python3 04_benchmark.py ./imagenes_lab --models qwen3-vl:8b qwen3-vl:4b
+    python3 04_benchmark.py fotosClean --runs 3
+    python3 04_benchmark.py fotosClean --models qwen3-vl:8b qwen3-vl:4b
+    python3 04_benchmark.py fotosClean --scope todo
 """
 import argparse
-import base64
 import glob
 import json
 import os
-import re
 import statistics
 import sys
-import time
 
 import requests
 
-OLLAMA_URL = "http://localhost:11434/v1/chat/completions"
-
-SYSTEM_PROMPT = (
-    "Sos un asistente de inspección industrial. Respondés SIEMPRE en JSON válido, "
-    "sin texto extra ni markdown."
+from vlm_common import (
+    IMG_EXTS,
+    OLLAMA_URL,
+    SCOPES,
+    encode_image,
+    load_config,
+    query_vlm,
 )
-USER_PROMPT = (
-    "Identificá manómetros, válvulas y EPP en la imagen. Devolvé "
-    '{"objetos":[{"tipo":..., "bbox":[x_min,y_min,x_max,y_max], '
-    '"lectura":..., "confianza":...}]} con coordenadas normalizadas 0-1.'
-)
-
-IMG_EXTS = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp")
-
-
-def encode_image(path):
-    with open(path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
-
-
-def is_valid_json(text):
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    text = re.sub(r"^```(?:json)?", "", text.strip()).strip()
-    text = re.sub(r"```$", "", text).strip()
-    try:
-        json.loads(text)
-        return True
-    except json.JSONDecodeError:
-        m = re.search(r"\{.*\}", text, re.DOTALL)
-        if m:
-            try:
-                json.loads(m.group(0))
-                return True
-            except json.JSONDecodeError:
-                return False
-    return False
-
-
-def query(model, img_b64, url):
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": USER_PROMPT},
-                    {"type": "image_url",
-                     "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}},
-                ],
-            },
-        ],
-        "temperature": 0.1,
-        "max_tokens": 768,
-        "response_format": {"type": "json_object"},
-    }
-    t0 = time.perf_counter()
-    r = requests.post(url, json=payload, timeout=180)
-    r.raise_for_status()
-    elapsed = time.perf_counter() - t0
-    content = r.json()["choices"][0]["message"]["content"]
-    return elapsed, is_valid_json(content)
 
 
 def pctl(values, p):
@@ -99,40 +44,34 @@ def pctl(values, p):
     return s[f] + (s[c] - s[f]) * (k - f)
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("folder", help="Carpeta con imágenes del lab")
-    ap.add_argument("--models", nargs="+",
-                    default=["qwen3-vl:8b", "qwen3-vl:4b", "qwen2.5vl:7b"])
-    ap.add_argument("--runs", type=int, default=3, help="Repeticiones por imagen")
-    ap.add_argument("--url", default=OLLAMA_URL)
-    args = ap.parse_args()
-
+def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=4096,
+                  think=False, url=OLLAMA_URL, out="benchmark_resultados.json"):
+    """Corre el benchmark e imprime la tabla comparativa. Devuelve el dict de resultados."""
     images = []
     for ext in IMG_EXTS:
-        images.extend(glob.glob(os.path.join(args.folder, ext)))
+        images.extend(glob.glob(os.path.join(folder, ext)))
     if not images:
-        print(f"[ERROR] No hay imágenes en {args.folder}", file=sys.stderr)
-        sys.exit(1)
-    print(f"[..] {len(images)} imágenes, {args.runs} runs c/u, "
-          f"{len(args.models)} modelo(s).\n")
+        print(f"[ERROR] No hay imágenes en {folder}", file=sys.stderr)
+        return None
+    print(f"[..] {len(images)} imágenes, {runs} runs c/u, {len(models)} modelo(s), "
+          f"modo: {scope}.\n")
 
     encoded = {p: encode_image(p) for p in images}
     results = {}
 
-    for model in args.models:
+    for model in models:
         print(f"=== Modelo: {model} ===")
-        latencies, valid, errors = [], 0, 0
-        total = 0
+        latencies, valid, errors, total = [], 0, 0, 0
         for img in images:
-            for _ in range(args.runs):
+            for _ in range(runs):
                 total += 1
                 try:
-                    lat, ok = query(model, encoded[img], args.url)
-                    latencies.append(lat)
-                    valid += 1 if ok else 0
-                    flag = "json-ok" if ok else "json-FALLA"
-                    print(f"  {os.path.basename(img):30s} {lat:6.2f}s  {flag}")
+                    res = query_vlm(encoded[img], model, scope=scope,
+                                    max_tokens=max_tokens, think=think, url=url)
+                    latencies.append(res["elapsed"])
+                    valid += 1 if res["ok"] else 0
+                    flag = "json-ok" if res["ok"] else "json-FALLA"
+                    print(f"  {os.path.basename(img):30s} {res['elapsed']:6.2f}s  {flag}")
                 except requests.RequestException as e:
                     errors += 1
                     print(f"  {os.path.basename(img):30s}  ERROR: {e}")
@@ -157,9 +96,33 @@ def main():
     print("=" * 72)
     print("Objetivo del doc (F1.8): P95 < 1.5 s on-prem, tasa JSON alta para VLM->VLA.")
 
-    with open("benchmark_resultados.json", "w", encoding="utf-8") as f:
+    with open(out, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
-    print("\n[OK] Guardado en benchmark_resultados.json")
+    print(f"\n[OK] Guardado en {out}")
+    return results
+
+
+def main():
+    cfg = load_config()  # los defaults salen de config.json
+    ap = argparse.ArgumentParser(description="Benchmark de latencia y JSON del VLM.")
+    ap.add_argument("folder", nargs="?", default=cfg["folder"],
+                    help="Carpeta con imágenes. Default: el de config.json")
+    ap.add_argument("--models", nargs="+", default=cfg["benchmark_models"],
+                    help="Modelos a comparar")
+    ap.add_argument("--runs", type=int, default=cfg["benchmark_runs"],
+                    help="Repeticiones por imagen")
+    ap.add_argument("--scope", choices=list(SCOPES), default=cfg["scope"],
+                    help="Modo de detección: industrial | todo")
+    ap.add_argument("--url", default=cfg["url"])
+    ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
+                    help="Tope de tokens de salida (incluye razonamiento)")
+    ap.add_argument("--think", action="store_true", default=cfg["think"],
+                    help="Permitir razonamiento del modelo (más lento)")
+    args = ap.parse_args()
+
+    res = run_benchmark(args.folder, args.models, runs=args.runs, scope=args.scope,
+                        max_tokens=args.max_tokens, think=args.think, url=args.url)
+    sys.exit(0 if res else 1)
 
 
 if __name__ == "__main__":

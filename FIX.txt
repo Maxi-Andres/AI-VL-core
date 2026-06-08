@@ -1,0 +1,20 @@
+hacer que funcione mejor, inentar sacar el think, o que minimo lo imprima en la respuesta
+fijate que onda los max_tokens en que influjen
+
+me parece que hay que mejorar la propmt inicial, por que pone el think:
+[!] No devolvió JSON parseable.
+[!] content vino VACÍO.
+    -> Cortado por longitud. Subí max_tokens.
+    -> El modelo gastó tokens en razonamiento. Desactivá 'think' o subí max_tokens.
+    reasoning_content (primeros 500 chars):
+Got it, let's analyze the image. The main object here is a flow meter, which is an industrial instrument. Let's check the categories. The user specified manometro, termometro, valvula, sensor, epp, otro.
+
+First, identify each part. The device has a digital display with "CONTATEC" on it. It's mounted on a metallic body with arrows indicating flow direction. This is likely a flow meter, which falls under 
+cuando subi los tokens esto dejo de pasar
+
+hacer un front end real mas comodo despues
+probar con mas fotos y poner las fotos bien con los nombres
+que si yo agrego mas fotos automaticamente me de mas opciones y las detecte 
+
+
+provar que onda YOLOv8 o v11 quiza son mas rapidos, 
