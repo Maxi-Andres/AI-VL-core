@@ -1,4 +1,4 @@
-hacer que funcione mejor, inentar sacar el think, o que minimo me imprima lo que va pensando
+hacer que funcione mejor, intenta sacar el think por que lo sigue haciendo, o que minimo me imprima lo que va pensando
 fijate que onda los max_tokens en que influyen, si pongo ollama ps tienen un context, no se si eso influye
 
 me parece que hay que mejorar la propmt inicial, por que pone el think:
@@ -10,7 +10,81 @@ me parece que hay que mejorar la propmt inicial, por que pone el think:
 Got it, let's analyze the image. The main object here is a flow meter, which is an industrial instrument. Let's check the categories. The user specified manometro, termometro, valvula, sensor, epp, otro.
 
 First, identify each part. The device has a digital display with "CONTATEC" on it. It's mounted on a metallic body with arrows indicating flow direction. This is likely a flow meter, which falls under 
-cuando subi los tokens esto dejo de pasar
+cuando subi los tokens esto dejo de pasar, quiza si el propt tendra todo podria pensar mas rapido por que es como que duda en que categoria ponerlo pero yo no tengo una lista osea tiene que poder identificar que es
+pongo un ejemplo de ocsas que deberia detectar pero devuelta tiene que ser capaz de detectar cualquier instrumento asi de industria tipo oil and gas
+Medición de presión
+
+Manómetro
+Transmisor de presión
+Presostato
+Vacuómetro
+
+Medición de temperatura
+
+Termopar (thermocouple)
+RTD (Pt100/Pt1000)
+Termómetro bimetálico
+Pirómetro infrarrojo
+Termorresistencia
+
+Medición de caudal / flujo
+
+Caudalímetro electromagnético
+Caudalímetro de turbina
+Flujómetro ultrasónico
+Medidor de Coriolis
+Placa orificio + transmisor de presión diferencial
+Rotámetro (variable area)
+
+Medición de nivel
+
+Sensor ultrasónico de nivel
+Sensor radar (FMCW)
+Transmisor de presión hidrostática
+Flotador / boya
+Sensor capacitivo
+Limnómetro
+
+Medición de variables eléctricas
+
+Analizador de red
+Vatímetro
+Multímetro industrial
+Transformador de corriente (TC)
+Transformador de tensión (TP)
+
+Análisis de gases y líquidos
+
+Analizador de oxígeno (O₂)
+Analizador de CO / CO₂
+Medidor de pH
+Conductímetro
+Turbidímetro
+Cromatógrafo de gases
+
+Control y actuación
+
+Controlador PID
+Variador de frecuencia (VFD)
+Válvula de control (neumática / eléctrica)
+Posicionador de válvula
+Servomotor
+
+Vibración y condición de máquinas
+
+Acelerómetro
+Sensor de vibración (velocidad)
+Detector de proximidad / desplazamiento (Eddy Current)
+Analizador de espectro de vibraciones
+
+Otros
+
+Taquímetro / encoder
+Celda de carga (pesaje)
+Detector de nivel puntual (tipo diapasón, etc.)
+Sensor de posición (LVDT, potenciómetro lineal)
+
+quiza que el prompt en ingles??? es mas eficiente asi?
 
 hacer un front end real mas comodo despues
 probar con mas fotos y poner las fotos bien con los nombres

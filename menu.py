@@ -118,13 +118,23 @@ def pick_scope(cfg):
 
 def toggle_think(cfg):
     cfg["think"] = not cfg["think"]
-    print(f"-> Razonamiento (think): {'ON (más lento)' if cfg['think'] else 'OFF'}")
+    if cfg["think"]:
+        print("-> Razonamiento (think): ON — se imprime en vivo lo que piensa el modelo.")
+    else:
+        print("-> Razonamiento (think): OFF — OJO: en qwen3-vl think=false NO lo apaga "
+              "del todo, sólo acorta el razonamiento. Igual conviene dejar margen de tokens.")
 
 
 def set_max_tokens(cfg):
-    v = ask(f"max_tokens (actual: {cfg['max_tokens']}): ")
+    print("  max_tokens = tope de tokens de SALIDA (num_predict). Incluye el razonamiento.")
+    print("  num_ctx    = ventana total entrada+salida (la que muestra `ollama ps`).")
+    print("               Subirla da más resolución a la imagen y más lugar para razonar.")
+    v = ask(f"max_tokens (actual: {cfg['max_tokens']}, Enter = dejar): ")
     if v.isdigit():
         cfg["max_tokens"] = int(v)
+    c = ask(f"num_ctx (actual: {cfg['num_ctx']}, Enter = dejar): ")
+    if c.isdigit():
+        cfg["num_ctx"] = int(c)
 
 
 def benchmark_settings(cfg):
@@ -149,7 +159,8 @@ def show_config(cfg):
     print(f"  Carpeta (bench)   : {cfg['folder']}")
     print(f"  Modo detección    : {cfg['scope']} ({SCOPES[cfg['scope']]['label']})")
     print(f"  Razonamiento think: {'ON' if cfg['think'] else 'OFF'}")
-    print(f"  max_tokens        : {cfg['max_tokens']}")
+    print(f"  max_tokens (salida): {cfg['max_tokens']}")
+    print(f"  num_ctx (ventana) : {cfg['num_ctx']}")
     print(f"  URL Ollama        : {cfg['url']}")
     print(f"  Bench: runs       : {cfg['benchmark_runs']}")
     print(f"  Bench: modelos    : {', '.join(cfg['benchmark_models'])}")
@@ -161,22 +172,22 @@ def show_config(cfg):
 # --------------------------------------------------------------------------- #
 MENU = """
 ┌────────────────────────────────────────────────┐
-│           VLM PoC — Menú principal               │
+│           VLM PoC — Menú principal             │
 ├────────────────────────────────────────────────┤
-│  ANALIZAR                                        │
-│   1) Smoke test (1 imagen)                       │
-│   2) Benchmark (carpeta, P50/P95, JSON%)         │
-│                                                  │
-│  CONFIGURAR (se guarda en config.json)           │
-│   3) Modelo                                      │
-│   4) Imagen                                      │
-│   5) Modo de detección (industrial / todo)       │
-│   6) Razonamiento think (ON/OFF)                 │
-│   7) max_tokens                                  │
-│   8) Ajustes del benchmark (runs / modelos)      │
-│   9) Ver config actual                           │
-│                                                  │
-│   0) Salir                                       │
+│  ANALIZAR                                      │
+│   1) Smoke test (1 imagen)                     │
+│   2) Benchmark (carpeta, P50/P95, JSON%)       │
+│                                                │
+│  CONFIGURAR (se guarda en config.json)         │
+│   3) Modelo                                    │
+│   4) Imagen                                    │
+│   5) Modo de detección (industrial / todo)     │
+│   6) Razonamiento think (ON/OFF)               │
+│   7) max_tokens / num_ctx                      │
+│   8) Ajustes del benchmark (runs / modelos)    │
+│   9) Ver config actual                         │
+│                                                │
+│   0) Salir                                     │
 └────────────────────────────────────────────────┘"""
 
 
@@ -191,12 +202,14 @@ def main():
         if choice == "1":
             save_config(cfg)
             run_smoke(cfg["image"], cfg["model"], scope=cfg["scope"],
-                      max_tokens=cfg["max_tokens"], think=cfg["think"], url=cfg["url"])
+                      max_tokens=cfg["max_tokens"], think=cfg["think"],
+                      url=cfg["url"], num_ctx=cfg["num_ctx"])
         elif choice == "2":
             save_config(cfg)
             run_benchmark(cfg["folder"], cfg["benchmark_models"],
                           runs=cfg["benchmark_runs"], scope=cfg["scope"],
-                          max_tokens=cfg["max_tokens"], think=cfg["think"], url=cfg["url"])
+                          max_tokens=cfg["max_tokens"], think=cfg["think"],
+                          url=cfg["url"], num_ctx=cfg["num_ctx"])
         elif choice == "3":
             pick_model(cfg); save_config(cfg)
         elif choice == "4":

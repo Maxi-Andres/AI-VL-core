@@ -26,9 +26,10 @@ import requests
 
 from vlm_common import (
     IMG_EXTS,
-    OLLAMA_URL,
+    OLLAMA_HOST,
     SCOPES,
     encode_image,
+    image_size,
     load_config,
     query_vlm,
 )
@@ -45,7 +46,8 @@ def pctl(values, p):
 
 
 def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=4096,
-                  think=False, url=OLLAMA_URL, out="benchmark_resultados.json"):
+                  think=True, url=OLLAMA_HOST, num_ctx=8192,
+                  out="benchmark_resultados.json"):
     """Corre el benchmark e imprime la tabla comparativa. Devuelve el dict de resultados."""
     images = []
     for ext in IMG_EXTS:
@@ -57,6 +59,7 @@ def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=4096,
           f"modo: {scope}.\n")
 
     encoded = {p: encode_image(p) for p in images}
+    sizes = {p: image_size(p) for p in images}
     results = {}
 
     for model in models:
@@ -67,7 +70,8 @@ def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=4096,
                 total += 1
                 try:
                     res = query_vlm(encoded[img], model, scope=scope,
-                                    max_tokens=max_tokens, think=think, url=url)
+                                    max_tokens=max_tokens, think=think, url=url,
+                                    num_ctx=num_ctx, size=sizes[img])
                     latencies.append(res["elapsed"])
                     valid += 1 if res["ok"] else 0
                     flag = "json-ok" if res["ok"] else "json-FALLA"
@@ -115,13 +119,18 @@ def main():
                     help="Modo de detección: industrial | todo")
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
-                    help="Tope de tokens de salida (incluye razonamiento)")
-    ap.add_argument("--think", action="store_true", default=cfg["think"],
-                    help="Permitir razonamiento del modelo (más lento)")
+                    help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")
+    ap.add_argument("--num-ctx", type=int, default=cfg.get("num_ctx", 8192),
+                    help="Ventana de contexto (entrada+salida); la que ves en `ollama ps`")
+    ap.add_argument("--think", dest="think", action="store_true", default=cfg["think"],
+                    help="Razonamiento del modelo (default ON)")
+    ap.add_argument("--no-think", dest="think", action="store_false",
+                    help="Pedir think=false")
     args = ap.parse_args()
 
     res = run_benchmark(args.folder, args.models, runs=args.runs, scope=args.scope,
-                        max_tokens=args.max_tokens, think=args.think, url=args.url)
+                        max_tokens=args.max_tokens, think=args.think, url=args.url,
+                        num_ctx=args.num_ctx)
     sys.exit(0 if res else 1)
 
 

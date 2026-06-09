@@ -1,11 +1,12 @@
 {
   "model": "qwen3-vl:4b",
-  "image": "fotosClean/8.jpeg",
+  "image": "fotosClean/14.jpeg",
   "folder": "fotosClean",
   "scope": "industrial",
-  "max_tokens": 16384,
-  "think": false,
-  "url": "http://localhost:11434/v1/chat/completions",
+  "max_tokens": 4096,
+  "num_ctx": 8192,
+  "think": true,
+  "url": "http://localhost:11434",
   "benchmark_models": [
     "qwen3-vl:8b",
     "qwen3-vl:4b",
