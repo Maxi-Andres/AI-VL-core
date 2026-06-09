@@ -45,8 +45,8 @@ def pctl(values, p):
     return s[f] + (s[c] - s[f]) * (k - f)
 
 
-def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=4096,
-                  think=True, url=OLLAMA_HOST, num_ctx=8192,
+def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=8192,
+                  think=True, url=OLLAMA_HOST, num_ctx=16384,
                   out="benchmark_resultados.json"):
     """Corre el benchmark e imprime la tabla comparativa. Devuelve el dict de resultados."""
     images = []
@@ -120,7 +120,7 @@ def main():
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
                     help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")
-    ap.add_argument("--num-ctx", type=int, default=cfg.get("num_ctx", 8192),
+    ap.add_argument("--num-ctx", type=int, default=cfg.get("num_ctx", 16384),
                     help="Ventana de contexto (entrada+salida); la que ves en `ollama ps`")
     ap.add_argument("--think", dest="think", action="store_true", default=cfg["think"],
                     help="Razonamiento del modelo (default ON)")

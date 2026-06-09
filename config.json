@@ -1,10 +1,10 @@
 {
   "model": "qwen3-vl:4b",
-  "image": "fotosClean/14.jpeg",
+  "image": "fotosClean/20.jpeg",
   "folder": "fotosClean",
   "scope": "industrial",
-  "max_tokens": 4096,
-  "num_ctx": 8192,
+  "max_tokens": 8192,
+  "num_ctx": 16384,
   "think": true,
   "url": "http://localhost:11434",
   "benchmark_models": [

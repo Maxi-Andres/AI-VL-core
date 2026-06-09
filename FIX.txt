@@ -21,68 +21,7 @@ Vacuómetro
 
 Medición de temperatura
 
-Termopar (thermocouple)
-RTD (Pt100/Pt1000)
-Termómetro bimetálico
-Pirómetro infrarrojo
-Termorresistencia
 
-Medición de caudal / flujo
-
-Caudalímetro electromagnético
-Caudalímetro de turbina
-Flujómetro ultrasónico
-Medidor de Coriolis
-Placa orificio + transmisor de presión diferencial
-Rotámetro (variable area)
-
-Medición de nivel
-
-Sensor ultrasónico de nivel
-Sensor radar (FMCW)
-Transmisor de presión hidrostática
-Flotador / boya
-Sensor capacitivo
-Limnómetro
-
-Medición de variables eléctricas
-
-Analizador de red
-Vatímetro
-Multímetro industrial
-Transformador de corriente (TC)
-Transformador de tensión (TP)
-
-Análisis de gases y líquidos
-
-Analizador de oxígeno (O₂)
-Analizador de CO / CO₂
-Medidor de pH
-Conductímetro
-Turbidímetro
-Cromatógrafo de gases
-
-Control y actuación
-
-Controlador PID
-Variador de frecuencia (VFD)
-Válvula de control (neumática / eléctrica)
-Posicionador de válvula
-Servomotor
-
-Vibración y condición de máquinas
-
-Acelerómetro
-Sensor de vibración (velocidad)
-Detector de proximidad / desplazamiento (Eddy Current)
-Analizador de espectro de vibraciones
-
-Otros
-
-Taquímetro / encoder
-Celda de carga (pesaje)
-Detector de nivel puntual (tipo diapasón, etc.)
-Sensor de posición (LVDT, potenciómetro lineal)
 
 quiza que el prompt en ingles??? es mas eficiente asi?
 
@@ -92,3 +31,6 @@ que si yo agrego mas fotos automaticamente me de mas opciones y las detecte
 
 
 provar que onda YOLOv8 o v11 quiza son mas rapidos, 
+
+
+con la imagen 16 se quedo sin context

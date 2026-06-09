@@ -106,8 +106,8 @@ Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
   "image": "fotosClean/2.jpeg",
   "folder": "fotosClean",
   "scope": "industrial",
-  "max_tokens": 4096,
-  "num_ctx": 8192,
+  "max_tokens": 8192,
+  "num_ctx": 16384,
   "think": true,
   "url": "http://localhost:11434",
   "benchmark_models": ["qwen3-vl:8b", "qwen3-vl:4b", "qwen2.5vl:7b"],
@@ -125,15 +125,45 @@ Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
   mandar `"think": false` **no lo apaga de verdad**, solo lo acorta. El problema
   real no es el flag sino quedarse sin tokens: si el razonamiento se come todo el
   presupuesto, `content` vuelve vacío (`finish_reason: length`). La solución es
-  darle aire con `max_tokens` (salida) y `num_ctx` (ventana total). Usamos el
-  endpoint **nativo** de Ollama (`/api/chat`, no el `/v1/...`) porque separa el
-  razonamiento (`thinking`) del JSON (`content`) y permite **imprimirlo en vivo**.
-- **`max_tokens` vs `num_ctx`:** `max_tokens` (`num_predict`) limita lo que el
-  modelo *genera* (razonamiento + respuesta). `num_ctx` es la ventana total
-  (entrada + salida) y es lo que ves en `ollama ps`. La imagen + prompt ya ocupan
-  ~1000–2600 tokens de entrada, así que `num_ctx` tiene que ser bastante mayor
-  que eso + la salida que querés. Subir `num_ctx` además le da **más resolución**
-  a la imagen.
+  doble: **(1)** un prompt que lo frene (ver abajo) y **(2)** darle aire con
+  `max_tokens` (salida) y `num_ctx` (ventana total). Usamos el endpoint **nativo**
+  de Ollama (`/api/chat`, no el `/v1/...`) porque separa el razonamiento
+  (`thinking`) del JSON (`content`) y permite **imprimirlo en vivo**.
+- **Prompt anti-loop (por qué se quedaba sin contexto):** el caso típico era una
+  imagen donde el modelo *reconocía* el objeto (p. ej. un bushing / transformador)
+  pero entraba en bucle **debatiendo en qué familia ponerlo** (`electrica`? `otro`?
+  `control`?) hasta agotar los tokens → `content` vacío. El prompt de `industrial`
+  ahora corta eso de raíz:
+  - el `system` le pide **razonar en pocos pasos, sin repetirse, y pasar al JSON
+    apenas reconoce el objeto** (no re-evaluar la categoría);
+  - el `user` arranca con una **REGLA explícita**: identificar de un vistazo, no
+    debatir, y si duda entre dos familias elegir una y poner el detalle en
+    `descripcion` (o usar `otro`);
+  - se aclara que **los equipos también cuentan** (no solo instrumentos de medición)
+    y se ampliaron las familias (`electrica` ahora incluye transformador, bushing,
+    seccionador, interruptor, barra, celda; se sumaron ejemplos de `valvula` y `epp`).
+
+  Resultado esperado: razonamiento más corto (más rápido) y sin truncarse. Igual
+  conviene dejar margen de tokens para las imágenes difíciles.
+- **`max_tokens` vs `num_ctx` (la diferencia que importa):**
+  - **`num_ctx`** = la **ventana de contexto completa**: todo lo que entra +
+    todo lo que sale. Es decir `entrada (system + user + tokens de la imagen) +
+    salida (razonamiento + respuesta)`. Es el número que ves en `ollama ps` bajo
+    *context*. Además, **más `num_ctx` deja que Ollama mande la imagen a mayor
+    resolución** (más tokens de imagen → más detalle).
+  - **`max_tokens`** (= `num_predict`) = el **tope de lo que el modelo *genera***
+    (razonamiento + respuesta). Cuando se llega a este tope, corta y devuelve
+    `finish_reason: length` (lo que te pasaba: cortaba en pleno razonamiento).
+  - **Cómo se combinan:** el presupuesto real de salida es
+    `min(max_tokens, num_ctx − tokens_de_entrada)`. O sea, **los dos tienen que
+    alcanzar**: si `max_tokens` es chico, corta aunque sobre `num_ctx`; si
+    `num_ctx` es chico, la entrada (imagen incluida) le come lugar a la salida y
+    también corta. La entrada acá ronda ~1000–2600 tokens, así que con
+    `num_ctx 16384` y `max_tokens 8192` quedan holgados los dos.
+  - **Defaults actuales:** `max_tokens 8192`, `num_ctx 16384` (antes 4096 / 8192,
+    que se quedaban cortos en imágenes difíciles). Subilos más con `--max-tokens`
+    / `--num-ctx` si una imagen sigue truncándose; bajalos si querés más velocidad
+    y tus imágenes son simples.
 - **Latencia vs objetivo F1.8:** el target de **P95 < 1.5 s** no es alcanzable
   con un VLM de esta clase en este hardware (mejor caso ~15 s). Para acercarse
   haría falta otro modelo/cuantización, bajar resolución de imagen, o más VRAM.

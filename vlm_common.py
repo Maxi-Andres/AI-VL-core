@@ -68,28 +68,37 @@ SCOPES = {
         "label": "Instrumentos industriales (oil & gas / minería)",
         "system": (
             "Sos un asistente experto en inspección industrial para minería y "
-            "oil & gas. Reconocés CUALQUIER instrumento o equipo de planta. "
+            "oil & gas. Reconocés CUALQUIER instrumento, equipo u objeto de planta. "
+            "Razoná en POCOS pasos y SIN repetirte: en cuanto reconocés un objeto, "
+            "pasá directo al JSON. No re-evalúes la categoría ni vuelvas sobre lo "
+            "que ya pensaste. "
             "Respondés ÚNICAMENTE con un objeto JSON válido: sin markdown, sin "
             "fences, sin texto antes ni después."
         ),
         "user": (
             "Identificá TODOS los instrumentos, equipos u objetos industriales "
-            "visibles en la imagen. Tenés que poder reconocer CUALQUIER instrumento "
-            "de industria, no te limites a una lista. Como REFERENCIA (no exhaustiva), "
-            "instrumentos típicos por familia:\n"
+            "visibles en la imagen. Cuentan tanto los aparatos de medición como los "
+            "equipos de planta (transformadores, válvulas, motores, etc.). Reconocé "
+            "CUALQUIER elemento de industria, no te limites a una lista.\n\n"
+            "REGLA IMPORTANTE — no te trabes en la categoría:\n"
+            "  - Identificá el objeto de un vistazo y elegí la familia más cercana. NO debatas.\n"
+            "  - Si dudás entre dos familias, elegí una cualquiera y poné el detalle en 'descripcion'.\n"
+            "  - Si no encaja en ninguna, usá 'otro'. Nunca repitas el mismo razonamiento.\n\n"
+            "Familias (tipo) con ejemplos de REFERENCIA (no es lista cerrada):\n"
             "- presion: manómetro, transmisor de presión, presostato, vacuómetro.\n"
             "- temperatura: termómetro bimetálico, termopar, RTD/Pt100, pirómetro, termopozo.\n"
             "- caudal: caudalímetro electromagnético/turbina/ultrasónico, Coriolis, rotámetro, placa orificio.\n"
             "- nivel: ultrasónico, radar, transmisor hidrostático, flotador, capacitivo.\n"
-            "- electrica: analizador de red, vatímetro, multímetro, TC, TP.\n"
+            "- electrica: transformador, aislador/bushing, seccionador, interruptor, barra, celda, analizador de red, multímetro, TC, TP.\n"
             "- analisis: analizador O2/CO/CO2, pHmetro, conductímetro, turbidímetro, cromatógrafo.\n"
             "- control: válvula de control, posicionador, servomotor, VFD, controlador PID.\n"
             "- vibracion: acelerómetro, sensor de vibración, sonda de proximidad (eddy current).\n"
-            "- otro: encoder/taquímetro, celda de carga, EPP, lo que no encaje arriba.\n"
-            "No dudes demasiado en la categoría: elegí la familia más cercana y seguí.\n"
+            "- valvula: válvula manual, esférica, compuerta, mariposa, de seguridad.\n"
+            "- epp: casco, guantes, arnés, protección visual/auditiva.\n"
+            "- otro: encoder/taquímetro, celda de carga, lo que no encaje arriba.\n\n"
             "Para cada objeto devolvé un item con:\n"
             '  "tipo": una de (presion|temperatura|caudal|nivel|electrica|analisis|control|vibracion|valvula|epp|otro),\n'
-            '  "descripcion": qué es exactamente (p. ej. "caudalímetro electromagnético CONTATEC"),\n'
+            '  "descripcion": qué es exactamente (p. ej. "bushing de alta tensión" o "caudalímetro electromagnético CONTATEC"),\n'
             '  "bbox": [x_min, y_min, x_max, y_max] normalizado entre 0 y 1,\n'
             '  "lectura": el valor que muestra el instrumento si es legible, o null,\n'
             '  "confianza": 0 a 1.\n'
@@ -101,7 +110,9 @@ SCOPES = {
         "label": "Cualquier objeto (uso general)",
         "system": (
             "Sos un asistente de visión que identifica cualquier objeto en una "
-            "imagen. Respondés ÚNICAMENTE con un objeto JSON válido: sin markdown, "
+            "imagen. Razoná en POCOS pasos y SIN repetirte: en cuanto reconocés un "
+            "objeto, pasá directo al JSON. "
+            "Respondés ÚNICAMENTE con un objeto JSON válido: sin markdown, "
             "sin fences, sin texto antes ni después."
         ),
         "user": (
@@ -126,8 +137,8 @@ DEFAULT_CONFIG = {
     "image": "fotosClean/1.jpeg",      # imagen para el smoke test
     "folder": "fotosClean",            # carpeta para el benchmark
     "scope": "industrial",             # modo de detección (industrial | todo)
-    "max_tokens": 4096,                # tope de tokens de SALIDA (num_predict; incluye el razonamiento)
-    "num_ctx": 8192,                   # ventana de contexto (entrada+salida); la que muestra `ollama ps`
+    "max_tokens": 8192,                # tope de tokens de SALIDA (num_predict; incluye el razonamiento)
+    "num_ctx": 16384,                  # ventana de contexto (entrada+salida); la que muestra `ollama ps`
     "think": True,                     # razonamiento del modelo (en qwen3-vl no se puede apagar de verdad; mejor verlo)
     "url": OLLAMA_HOST,                # host de Ollama
     "benchmark_models": ["qwen3-vl:8b", "qwen3-vl:4b", "qwen2.5vl:7b"],
@@ -245,8 +256,8 @@ def extract_json(text):
 # --------------------------------------------------------------------------- #
 # Cliente VLM (endpoint nativo /api/chat, con streaming)
 # --------------------------------------------------------------------------- #
-def query_vlm(img_b64, model, scope="industrial", max_tokens=4096,
-              think=True, url=OLLAMA_HOST, timeout=300, num_ctx=8192,
+def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
+              think=True, url=OLLAMA_HOST, timeout=300, num_ctx=16384,
               verbose=False, size=None):
     """Manda una imagen al VLM y devuelve un dict con la respuesta + diagnóstico.
 

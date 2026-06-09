@@ -2,9 +2,9 @@
 """
 03_smoke_test.py — Validación rápida del VLM sobre una imagen del lab.
 
-Manda una imagen al endpoint OpenAI-compatible de Ollama (el mismo que va a
-consumir el Silk AI Proxy Gateway / F1.9) y pide identificar objetos
-devolviendo JSON con bounding boxes.
+Manda una imagen al endpoint NATIVO de Ollama (/api/chat, vía vlm_common) y pide
+identificar objetos devolviendo JSON con bounding boxes. El contrato JSON es el
+que va a consumir el Silk AI Proxy Gateway / F1.9.
 
 ¿No querés escribir flags? Corré `python3 menu.py` (menú interactivo).
 
@@ -30,8 +30,8 @@ from vlm_common import (
 )
 
 
-def run_smoke(image, model, scope="industrial", max_tokens=4096,
-              think=True, url=OLLAMA_HOST, num_ctx=8192):
+def run_smoke(image, model, scope="industrial", max_tokens=8192,
+              think=True, url=OLLAMA_HOST, num_ctx=16384):
     """Corre el smoke test sobre una imagen e imprime el resultado.
 
     Con think=True imprime EN VIVO lo que el modelo va razonando (verbose).
@@ -69,7 +69,7 @@ def main():
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
                     help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")
-    ap.add_argument("--num-ctx", type=int, default=cfg.get("num_ctx", 8192),
+    ap.add_argument("--num-ctx", type=int, default=cfg.get("num_ctx", 16384),
                     help="Ventana de contexto (entrada+salida); la que ves en `ollama ps`")
     ap.add_argument("--think", dest="think", action="store_true", default=cfg["think"],
                     help="Razonamiento del modelo + impresión en vivo (default ON)")
