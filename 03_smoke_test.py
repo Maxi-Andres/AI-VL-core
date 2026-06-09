@@ -21,6 +21,7 @@ import requests
 
 from vlm_common import (
     OLLAMA_HOST,
+    PROMPT_VARIANTS,
     SCOPES,
     encode_image,
     image_size,
@@ -31,10 +32,11 @@ from vlm_common import (
 
 
 def run_smoke(image, model, scope="industrial", max_tokens=8192,
-              think=True, url=OLLAMA_HOST, num_ctx=16384):
+              think=True, url=OLLAMA_HOST, num_ctx=16384, variant=None):
     """Corre el smoke test sobre una imagen e imprime el resultado.
 
     Con think=True imprime EN VIVO lo que el modelo va razonando (verbose).
+    `variant` elige la variante de prompt (ver PROMPT_VARIANTS); None = default del scope.
     """
     try:
         img_b64 = encode_image(image)
@@ -42,11 +44,12 @@ def run_smoke(image, model, scope="industrial", max_tokens=8192,
         print(f"[ERROR] No encuentro la imagen: {image}", file=sys.stderr)
         return False
 
-    print(f"[..] Enviando '{image}' al modelo '{model}' (modo: {scope}) ...")
+    print(f"[..] Enviando '{image}' al modelo '{model}' "
+          f"(modo: {scope}, prompt: {variant or 'default'}) ...")
     try:
         res = query_vlm(img_b64, model, scope=scope, max_tokens=max_tokens,
                         think=think, url=url, timeout=300, num_ctx=num_ctx,
-                        verbose=True, size=image_size(image))
+                        verbose=True, size=image_size(image), variant=variant)
     except requests.RequestException as e:
         print(f"[ERROR] Falló la request a Ollama: {e}", file=sys.stderr)
         print("        ¿Está corriendo el servicio? curl http://localhost:11434/api/version")
@@ -66,6 +69,9 @@ def main():
                          "el 8b se parte CPU/GPU y es ~3x más lento)")
     ap.add_argument("--scope", choices=list(SCOPES), default=cfg["scope"],
                     help="Modo de detección: industrial (solo instrumentos) | todo (cualquier objeto)")
+    ap.add_argument("--variant", default=cfg.get("variant"),
+                    help="Variante de prompt (ej. v1_original, v2_antiloop). "
+                         "Default: el de config.json. Ver: python3 05_prompt_test.py --list")
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
                     help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")
@@ -79,7 +85,7 @@ def main():
 
     ok = run_smoke(args.image, args.model, scope=args.scope,
                    max_tokens=args.max_tokens, think=args.think, url=args.url,
-                   num_ctx=args.num_ctx)
+                   num_ctx=args.num_ctx, variant=args.variant)
     sys.exit(0 if ok else 1)
 
 

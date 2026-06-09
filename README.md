@@ -51,6 +51,7 @@ final el JSON, la latencia y los tokens de entrada/salida.
 | `image` (posic.)| `image`               | Ruta a la imagen. Si la omitís, usa la de config. |
 | `--model`       | `model`               | Modelo de Ollama (ej. `qwen3-vl:4b`, `qwen3-vl:8b`, `qwen2.5vl:7b`). |
 | `--scope`       | `scope`               | `industrial` (instrumentos industriales) o `todo` (cualquier objeto). |
+| `--variant`     | `variant`             | Variante de prompt (`v1_original`, `v2_antiloop`, …). Ver "Variantes de prompt". |
 | `--max-tokens`  | `max_tokens`          | Tope de tokens de **salida** (`num_predict`; incluye el razonamiento). |
 | `--num-ctx`     | `num_ctx`             | Ventana de contexto (entrada+salida); la que muestra `ollama ps`. |
 | `--think` / `--no-think` | `think`      | Razonamiento (default ON; en qwen3-vl `--no-think` no lo apaga del todo). |
@@ -71,12 +72,28 @@ python3 04_benchmark.py fotosClean --scope todo --runs 1
 | `--models`      | `benchmark_models`    | Lista de modelos a comparar (separados por espacio). |
 | `--runs`        | `benchmark_runs`      | Repeticiones por imagen. |
 | `--scope`       | `scope`               | `industrial` o `todo`. |
+| `--variant`     | `variant`             | Variante de prompt (`v1_original`, `v2_antiloop`, …). |
 | `--max-tokens`  | `max_tokens`          | Tope de tokens de salida (`num_predict`). |
 | `--num-ctx`     | `num_ctx`             | Ventana de contexto (la que muestra `ollama ps`). |
 | `--think` / `--no-think` | `think`      | Razonamiento del modelo (default ON). |
 | `--url`         | `url`                 | Host de Ollama. |
 
 Escribe la tabla comparativa por pantalla y guarda `benchmark_resultados.json`.
+
+### Comparar prompts — A/B de velocidad y JSON
+
+```bash
+python3 05_prompt_test.py --list                          # variantes disponibles
+python3 05_prompt_test.py fotosClean/16.jpeg --runs 2      # compara TODAS las variantes del scope
+python3 05_prompt_test.py fotosClean/16.jpeg --variants v1_original v2_antiloop
+python3 05_prompt_test.py --folder fotosClean --runs 1     # promedia sobre la carpeta
+```
+
+Corre la **misma imagen con distintas variantes de prompt** dejando todo lo demás
+constante (modelo, `max_tokens`, `num_ctx`, `think`), así la única variable es el
+prompt. Imprime media/P50 de latencia, % de JSON válido, cuántas se cortaron por
+`length`, objetos promedio y tokens de salida promedio; marca la mejor candidata
+y guarda `prompt_test_resultados.json`.
 
 ---
 
@@ -96,6 +113,33 @@ Los **bounding boxes** se devuelven normalizados 0–1. qwen3-vl los entrega en
 píxeles del archivo original, así que el código los normaliza solo (leyendo el
 tamaño real de la imagen del header JPEG/PNG).
 
+## Variantes de prompt (intercambiables / A-B test)
+
+Los prompts viven en `vlm_common.py` → `PROMPT_VARIANTS`, **uno por variante**, y
+están escritos en **inglés** (qwen3-vl razona en inglés; menos overhead de
+traducción). Las *keys* del JSON y los valores de `tipo` siguen en español porque
+son el contrato VLM→VLA.
+
+| scope | variante | cómo es |
+|-------|----------|---------|
+| `industrial` | `v1_original` | El prompt corto original. Da la lista de familias y dice "no dudes en la categoría". |
+| `industrial` | `v2_antiloop` | Más larga y explícita: aclara que **los equipos cuentan** (no solo instrumentos), amplía `electrica` (transformador, bushing, seccionador…) y arranca con una REGLA anti-deliberación para que **no se trabe eligiendo categoría** (era lo que vaciaba el `content`). |
+| `todo` | `default` | Único prompt para objetos genéricos. |
+
+**Cómo intercambiarlas** (3 formas, no hace falta tocar código salvo la última):
+1. `config.json` → clave `"variant"` (la usan menú, smoke y benchmark).
+2. Flag `--variant v2_antiloop` en `03_smoke_test.py` / `04_benchmark.py` (pisa la config para esa corrida).
+3. La variante **activa por defecto** está en `DEFAULT_VARIANT` (`vlm_common.py`); cambiala ahí si querés mover el default global.
+
+Para **agregar** una variante nueva: sumá una entrada a `PROMPT_VARIANTS["industrial"]`
+y compará con `python3 05_prompt_test.py … --variants <vieja> <nueva>`.
+
+> **Nota de medición:** en pruebas sobre las imágenes 1, 14 y 16, `v2_antiloop`
+> resultó **más rápida** que `v1_original` (p. ej. en la 16: ~15 s vs ~97 s),
+> porque cortar la deliberación de categoría ahorra muchos tokens de razonamiento.
+> La variante activa por defecto es `v1_original` (pedido explícito); cambiala a
+> `v2_antiloop` si querés la más rápida. Reproducí con `05_prompt_test.py`.
+
 ## config.json
 
 Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
@@ -106,6 +150,7 @@ Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
   "image": "fotosClean/2.jpeg",
   "folder": "fotosClean",
   "scope": "industrial",
+  "variant": "v1_original",
   "max_tokens": 8192,
   "num_ctx": 16384,
   "think": true,
@@ -175,6 +220,7 @@ Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
 | `menu.py`          | Menú interactivo (entrada principal). |
 | `03_smoke_test.py` | Smoke test de 1 imagen (CLI). |
 | `04_benchmark.py`  | Benchmark de latencia/JSON (CLI). |
-| `vlm_common.py`    | Núcleo compartido: prompts (`SCOPES`), cliente Ollama, config. |
+| `05_prompt_test.py`| Comparador A/B de variantes de prompt (velocidad / JSON). |
+| `vlm_common.py`    | Núcleo compartido: prompts (`PROMPT_VARIANTS`/`SCOPES`), cliente Ollama, config. |
 | `config.json`      | Configuración persistente (se crea sola). |
 | `fotosClean/`      | Imágenes de prueba. |

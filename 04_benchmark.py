@@ -46,7 +46,7 @@ def pctl(values, p):
 
 
 def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=8192,
-                  think=True, url=OLLAMA_HOST, num_ctx=16384,
+                  think=True, url=OLLAMA_HOST, num_ctx=16384, variant=None,
                   out="benchmark_resultados.json"):
     """Corre el benchmark e imprime la tabla comparativa. Devuelve el dict de resultados."""
     images = []
@@ -71,7 +71,7 @@ def run_benchmark(folder, models, runs=3, scope="industrial", max_tokens=8192,
                 try:
                     res = query_vlm(encoded[img], model, scope=scope,
                                     max_tokens=max_tokens, think=think, url=url,
-                                    num_ctx=num_ctx, size=sizes[img])
+                                    num_ctx=num_ctx, size=sizes[img], variant=variant)
                     latencies.append(res["elapsed"])
                     valid += 1 if res["ok"] else 0
                     flag = "json-ok" if res["ok"] else "json-FALLA"
@@ -117,6 +117,8 @@ def main():
                     help="Repeticiones por imagen")
     ap.add_argument("--scope", choices=list(SCOPES), default=cfg["scope"],
                     help="Modo de detección: industrial | todo")
+    ap.add_argument("--variant", default=cfg.get("variant"),
+                    help="Variante de prompt (ej. v1_original, v2_antiloop). Default: config.json")
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
                     help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")
@@ -130,7 +132,7 @@ def main():
 
     res = run_benchmark(args.folder, args.models, runs=args.runs, scope=args.scope,
                         max_tokens=args.max_tokens, think=args.think, url=args.url,
-                        num_ctx=args.num_ctx)
+                        num_ctx=args.num_ctx, variant=args.variant)
     sys.exit(0 if res else 1)
 
 

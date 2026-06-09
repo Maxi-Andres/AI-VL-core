@@ -58,75 +58,157 @@ def host_of(url):
 
 
 # --------------------------------------------------------------------------- #
-# MODOS DE DETECCIÓN (scope)
+# MODOS DE DETECCIÓN (scope) + VARIANTES DE PROMPT (intercambiables / A-B test)
 # --------------------------------------------------------------------------- #
-# "industrial": instrumentos/equipos de industria (oil & gas, minería). Categoría
-#               general + descripción libre, SIN limitarse a una lista cerrada.
-# "todo":       CUALQUIER objeto visible (industrial o no), categoría libre.
-SCOPES = {
+# Hay dos scopes:
+#   "industrial": instrumentos/equipos de industria (oil & gas, minería).
+#   "todo":       CUALQUIER objeto visible (industrial o no), categoría libre.
+#
+# Cada scope tiene VARIANTES de prompt en PROMPT_VARIANTS, para poder comparar
+# cuál es más rápida/mejor (ver 05_prompt_test.py). Los prompts están en INGLÉS
+# (el modelo razona en inglés; se busca menos overhead). Las KEYS y los valores
+# de `tipo` del JSON quedan en español porque son el contrato VLM->VLA.
+#
+# La variante ACTIVA por defecto (la que usan menú/smoke/benchmark) la define
+# DEFAULT_VARIANT. Para "intercambiar" el prompt, cambiá DEFAULT_VARIANT acá,
+# o pasá --variant en los scripts, o elegilo en el menú.
+SCOPE_LABELS = {
+    "industrial": "Industrial instruments (oil & gas / mining)",
+    "todo": "Any object (general use)",
+}
+
+# --- Industrial: variante v1 = el prompt ORIGINAL (corto, más rápido) --------
+_INDUSTRIAL_V1 = {
+    "system": (
+        "You are an expert assistant in industrial inspection for mining and "
+        "oil & gas. You recognize ANY plant instrument or equipment. "
+        "You respond ONLY with a valid JSON object: no markdown, no fences, "
+        "no text before or after."
+    ),
+    "user": (
+        "Identify ALL the industrial instruments, equipment or objects visible "
+        "in the image. You must be able to recognize ANY industrial instrument, "
+        "do not limit yourself to a list. As a REFERENCE (not exhaustive), "
+        "typical instruments by family:\n"
+        "- presion: pressure gauge, pressure transmitter, pressure switch, vacuum gauge.\n"
+        "- temperatura: bimetallic thermometer, thermocouple, RTD/Pt100, pyrometer, thermowell.\n"
+        "- caudal: electromagnetic/turbine/ultrasonic flow meter, Coriolis, rotameter, orifice plate.\n"
+        "- nivel: ultrasonic, radar, hydrostatic transmitter, float, capacitive.\n"
+        "- electrica: power analyzer, wattmeter, multimeter, CT, VT.\n"
+        "- analisis: O2/CO/CO2 analyzer, pH meter, conductivity meter, turbidimeter, chromatograph.\n"
+        "- control: control valve, positioner, actuator, VFD, PID controller.\n"
+        "- vibracion: accelerometer, vibration sensor, proximity probe (eddy current).\n"
+        "- otro: encoder/tachometer, load cell, PPE, anything that does not fit above.\n"
+        "Do not overthink the category: pick the closest family and move on.\n"
+        "For each object return an item with:\n"
+        '  "tipo": one of (presion|temperatura|caudal|nivel|electrica|analisis|control|vibracion|valvula|epp|otro),\n'
+        '  "descripcion": what it is exactly (e.g. "electromagnetic flow meter CONTATEC"),\n'
+        '  "bbox": [x_min, y_min, x_max, y_max] normalized between 0 and 1,\n'
+        '  "lectura": the value shown by the instrument if legible, or null,\n'
+        '  "confianza": 0 to 1.\n'
+        'Return ONLY: {"objetos": [ ... ]}. '
+        "Empty list only if there is NO object of interest."
+    ),
+}
+
+# --- Industrial: variante v2 = anti-loop (más larga, frena la deliberación) ---
+_INDUSTRIAL_V2 = {
+    "system": (
+        "You are an expert assistant in industrial inspection for mining and "
+        "oil & gas. You recognize ANY plant instrument, equipment or object. "
+        "Reason in FEW steps and WITHOUT repeating yourself: as soon as you "
+        "recognize an object, go straight to the JSON. Do not re-evaluate the "
+        "category or revisit what you already thought. "
+        "You respond ONLY with a valid JSON object: no markdown, no fences, "
+        "no text before or after."
+    ),
+    "user": (
+        "Identify ALL the industrial instruments, equipment or objects visible "
+        "in the image. Both measurement devices and plant equipment count "
+        "(transformers, valves, motors, etc.). Recognize ANY industrial element, "
+        "do not limit yourself to a list.\n\n"
+        "IMPORTANT RULE — do not get stuck on the category:\n"
+        "  - Identify the object at a glance and pick the closest family. Do NOT debate.\n"
+        "  - If you hesitate between two families, pick any one and put the detail in 'descripcion'.\n"
+        "  - If it fits none, use 'otro'. Never repeat the same reasoning.\n\n"
+        "Families (tipo) with REFERENCE examples (not a closed list):\n"
+        "- presion: pressure gauge, pressure transmitter, pressure switch, vacuum gauge.\n"
+        "- temperatura: bimetallic thermometer, thermocouple, RTD/Pt100, pyrometer, thermowell.\n"
+        "- caudal: electromagnetic/turbine/ultrasonic flow meter, Coriolis, rotameter, orifice plate.\n"
+        "- nivel: ultrasonic, radar, hydrostatic transmitter, float, capacitive.\n"
+        "- electrica: transformer, insulator/bushing, disconnector, breaker, busbar, switchgear, power analyzer, multimeter, CT, VT.\n"
+        "- analisis: O2/CO/CO2 analyzer, pH meter, conductivity meter, turbidimeter, chromatograph.\n"
+        "- control: control valve, positioner, actuator, VFD, PID controller.\n"
+        "- vibracion: accelerometer, vibration sensor, proximity probe (eddy current).\n"
+        "- valvula: manual, ball, gate, butterfly, safety valve.\n"
+        "- epp: helmet, gloves, harness, eye/ear protection.\n"
+        "- otro: encoder/tachometer, load cell, anything that does not fit above.\n\n"
+        "For each object return an item with:\n"
+        '  "tipo": one of (presion|temperatura|caudal|nivel|electrica|analisis|control|vibracion|valvula|epp|otro),\n'
+        '  "descripcion": what it is exactly (e.g. "high-voltage bushing" or "electromagnetic flow meter CONTATEC"),\n'
+        '  "bbox": [x_min, y_min, x_max, y_max] normalized between 0 and 1,\n'
+        '  "lectura": the value shown by the instrument if legible, or null,\n'
+        '  "confianza": 0 to 1.\n'
+        'Return ONLY: {"objetos": [ ... ]}. '
+        "Empty list only if there is NO object of interest."
+    ),
+}
+
+# --- Todo: variante única -----------------------------------------------------
+_TODO_DEFAULT = {
+    "system": (
+        "You are a vision assistant that identifies any object in an image. "
+        "You respond ONLY with a valid JSON object: no markdown, no fences, "
+        "no text before or after."
+    ),
+    "user": (
+        "Identify ALL the objects visible in the image, industrial or not. "
+        "For each object return an item with:\n"
+        '  "tipo": free one-word category (e.g. "persona", "herramienta", "vehiculo", "manometro"),\n'
+        '  "descripcion": what it is (short string),\n'
+        '  "bbox": [x_min, y_min, x_max, y_max] normalized between 0 and 1,\n'
+        '  "lectura": legible text on the object if any, or null,\n'
+        '  "confianza": 0 to 1.\n'
+        'Return ONLY: {"objetos": [ ... ]}. '
+        "Empty list only if the image has NO object at all."
+    ),
+}
+
+# Registro de variantes por scope. Agregá las que quieras y testealas con 05_prompt_test.py.
+PROMPT_VARIANTS = {
     "industrial": {
-        "label": "Instrumentos industriales (oil & gas / minería)",
-        "system": (
-            "Sos un asistente experto en inspección industrial para minería y "
-            "oil & gas. Reconocés CUALQUIER instrumento, equipo u objeto de planta. "
-            "Razoná en POCOS pasos y SIN repetirte: en cuanto reconocés un objeto, "
-            "pasá directo al JSON. No re-evalúes la categoría ni vuelvas sobre lo "
-            "que ya pensaste. "
-            "Respondés ÚNICAMENTE con un objeto JSON válido: sin markdown, sin "
-            "fences, sin texto antes ni después."
-        ),
-        "user": (
-            "Identificá TODOS los instrumentos, equipos u objetos industriales "
-            "visibles en la imagen. Cuentan tanto los aparatos de medición como los "
-            "equipos de planta (transformadores, válvulas, motores, etc.). Reconocé "
-            "CUALQUIER elemento de industria, no te limites a una lista.\n\n"
-            "REGLA IMPORTANTE — no te trabes en la categoría:\n"
-            "  - Identificá el objeto de un vistazo y elegí la familia más cercana. NO debatas.\n"
-            "  - Si dudás entre dos familias, elegí una cualquiera y poné el detalle en 'descripcion'.\n"
-            "  - Si no encaja en ninguna, usá 'otro'. Nunca repitas el mismo razonamiento.\n\n"
-            "Familias (tipo) con ejemplos de REFERENCIA (no es lista cerrada):\n"
-            "- presion: manómetro, transmisor de presión, presostato, vacuómetro.\n"
-            "- temperatura: termómetro bimetálico, termopar, RTD/Pt100, pirómetro, termopozo.\n"
-            "- caudal: caudalímetro electromagnético/turbina/ultrasónico, Coriolis, rotámetro, placa orificio.\n"
-            "- nivel: ultrasónico, radar, transmisor hidrostático, flotador, capacitivo.\n"
-            "- electrica: transformador, aislador/bushing, seccionador, interruptor, barra, celda, analizador de red, multímetro, TC, TP.\n"
-            "- analisis: analizador O2/CO/CO2, pHmetro, conductímetro, turbidímetro, cromatógrafo.\n"
-            "- control: válvula de control, posicionador, servomotor, VFD, controlador PID.\n"
-            "- vibracion: acelerómetro, sensor de vibración, sonda de proximidad (eddy current).\n"
-            "- valvula: válvula manual, esférica, compuerta, mariposa, de seguridad.\n"
-            "- epp: casco, guantes, arnés, protección visual/auditiva.\n"
-            "- otro: encoder/taquímetro, celda de carga, lo que no encaje arriba.\n\n"
-            "Para cada objeto devolvé un item con:\n"
-            '  "tipo": una de (presion|temperatura|caudal|nivel|electrica|analisis|control|vibracion|valvula|epp|otro),\n'
-            '  "descripcion": qué es exactamente (p. ej. "bushing de alta tensión" o "caudalímetro electromagnético CONTATEC"),\n'
-            '  "bbox": [x_min, y_min, x_max, y_max] normalizado entre 0 y 1,\n'
-            '  "lectura": el valor que muestra el instrumento si es legible, o null,\n'
-            '  "confianza": 0 a 1.\n'
-            'Devolvé SOLO: {"objetos": [ ... ]}. '
-            "Lista vacía únicamente si NO hay ningún objeto de interés."
-        ),
+        "v1_original": _INDUSTRIAL_V1,
+        "v2_antiloop": _INDUSTRIAL_V2,
     },
     "todo": {
-        "label": "Cualquier objeto (uso general)",
-        "system": (
-            "Sos un asistente de visión que identifica cualquier objeto en una "
-            "imagen. Razoná en POCOS pasos y SIN repetirte: en cuanto reconocés un "
-            "objeto, pasá directo al JSON. "
-            "Respondés ÚNICAMENTE con un objeto JSON válido: sin markdown, "
-            "sin fences, sin texto antes ni después."
-        ),
-        "user": (
-            "Identificá TODOS los objetos visibles en la imagen, sean industriales "
-            "o no. Para cada objeto devolvé un item con:\n"
-            '  "tipo": categoría libre en una palabra (p. ej. "persona", "herramienta", "vehiculo", "manometro"),\n'
-            '  "descripcion": qué es (string corto),\n'
-            '  "bbox": [x_min, y_min, x_max, y_max] normalizado entre 0 y 1,\n'
-            '  "lectura": texto legible en el objeto si lo hay, o null,\n'
-            '  "confianza": 0 a 1.\n'
-            'Devolvé SOLO: {"objetos": [ ... ]}. '
-            "Lista vacía únicamente si la imagen no tiene NINGÚN objeto."
-        ),
+        "default": _TODO_DEFAULT,
     },
+}
+
+# Variante ACTIVA por defecto en cada scope (la que usan menú/smoke/benchmark).
+# Volvimos a v1_original en industrial: es más corta y por eso más rápida.
+DEFAULT_VARIANT = {
+    "industrial": "v1_original",
+    "todo": "default",
+}
+
+
+def get_prompt(scope, variant=None):
+    """Devuelve el {system, user} de un scope/variante, con fallback al default.
+
+    Si `variant` es None o no existe para ese scope, usa DEFAULT_VARIANT[scope].
+    """
+    variants = PROMPT_VARIANTS[scope]
+    if variant and variant in variants:
+        return variants[variant]
+    return variants[DEFAULT_VARIANT[scope]]
+
+
+# SCOPES: vista "armada" que usan los entry points para label + prompt activo.
+# Mantiene la interfaz vieja (SCOPES[scope]["system"]/["user"]/["label"]).
+SCOPES = {
+    scope: {"label": SCOPE_LABELS[scope], **get_prompt(scope)}
+    for scope in PROMPT_VARIANTS
 }
 
 # --------------------------------------------------------------------------- #
@@ -137,6 +219,7 @@ DEFAULT_CONFIG = {
     "image": "fotosClean/1.jpeg",      # imagen para el smoke test
     "folder": "fotosClean",            # carpeta para el benchmark
     "scope": "industrial",             # modo de detección (industrial | todo)
+    "variant": "v1_original",          # variante de prompt activa (ver PROMPT_VARIANTS); None = default del scope
     "max_tokens": 8192,                # tope de tokens de SALIDA (num_predict; incluye el razonamiento)
     "num_ctx": 16384,                  # ventana de contexto (entrada+salida); la que muestra `ollama ps`
     "think": True,                     # razonamiento del modelo (en qwen3-vl no se puede apagar de verdad; mejor verlo)
@@ -258,7 +341,7 @@ def extract_json(text):
 # --------------------------------------------------------------------------- #
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
               think=True, url=OLLAMA_HOST, timeout=300, num_ctx=16384,
-              verbose=False, size=None):
+              verbose=False, size=None, variant=None):
     """Manda una imagen al VLM y devuelve un dict con la respuesta + diagnóstico.
 
     Usa el endpoint nativo /api/chat con streaming:
@@ -272,7 +355,7 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     `size` (ancho, alto) se usa para normalizar los bbox a 0..1.
     Levanta requests.RequestException si falla la red/el server.
     """
-    sp = SCOPES[scope]
+    sp = get_prompt(scope, variant)
     payload = {
         "model": model,
         "messages": [

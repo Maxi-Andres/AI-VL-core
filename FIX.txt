@@ -34,3 +34,39 @@ provar que onda YOLOv8 o v11 quiza son mas rapidos,
 
 
 con la imagen 16 se quedo sin context
+
+
+en ingles y que lo ponga el prompt como estaba que era mas rapido, ademas, quiero que este prompt nuevo tambien lo ponga y que se puedan intercambiar, ademas que haga un archivo de test
+que lo que pruebe son unas imagenes y el modelo con distintos prompts para ver con cual responde mas rapido
+
+
+
+poner un test bueno de verdad que te deje elegir cuantas imagenes, cuales, los modelos, las runs, etc, y que te de una barra que te muestre el progreso asi sabes
+ademas que te ponga los tiempos y todo, tiempo entre imagenes, tiepo en total, etc y fijate el tema de el contexto de quiza bajarlo a como estaba para que no tarde tanto?
+pero si tiene poco contexto no puede y falla ver diferencia netre max-tokens y num_ctx
+
+
+esto dijo: supuestamente mas contexto es mas lento
+El hallazgo importante (tu premisa no se sostuvo)
+
+Probé v1_original vs v2_antiloop y la nueva es más rápida en las 3 imágenes, no más lenta:
+
+┌────────┬─────────────┬─────────────┐
+│ imagen │ v1_original │ v2_antiloop │
+├────────┼─────────────┼─────────────┤
+│ 16     │ 97.2 s      │ 14.9 s      │
+├────────┼─────────────┼─────────────┤
+│ 1      │ 23.8 s      │ 11.8 s      │
+├────────┼─────────────┼─────────────┤
+│ 14     │ 30.3 s      │ 21.4 s      │
+└────────┴─────────────┴─────────────┘
+
+Por qué v2 es más rápida: al frenar la deliberación de categoría, gasta muchos menos tokens de razonamiento.
+
+Mi sospecha de qué viste vos: la lentitud que notaste probablemente no era el prompt sino el bump de num_ctx (8192 → 16384) que metí en el turno anterior — más contexto = Ollama manda la imagen a más resolución = prefill más lento, con cualquier prompt. Si querés velocidad pura, podés bajar num_ctx (v2 no se trunca igual porque no entra en loop).
+
+Una decisión tuya
+
+Dejé v1_original como default porque lo pediste explícitamente, pero los datos rápida y más confiable (era la que resolvía la foto 16 sin vaciarse). Paracambiar a v2: poné "variant": "v2_antiloop" en config.json, o usá la opción 7 del menú.
+
+¿Querés que deje v2_antiloop como default, o lo dejo en v1_original? Aparte: mpts están en español — quedó desactualizado con este cambio a inglés; ¿loactualizo?

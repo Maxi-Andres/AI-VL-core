@@ -18,6 +18,7 @@ import requests
 
 from vlm_common import (
     IMG_EXTS,
+    PROMPT_VARIANTS,
     SCOPES,
     load_config,
     save_config,
@@ -27,6 +28,7 @@ import importlib
 # Importamos los runners de los scripts numerados (nombre no-identificador).
 run_smoke = importlib.import_module("03_smoke_test").run_smoke
 run_benchmark = importlib.import_module("04_benchmark").run_benchmark
+run_prompt_test = importlib.import_module("05_prompt_test").run_prompt_test
 
 
 # --------------------------------------------------------------------------- #
@@ -116,6 +118,25 @@ def pick_scope(cfg):
         cfg["scope"] = keys[0]
 
 
+def pick_variant(cfg):
+    """Elige la variante de prompt activa para el scope actual."""
+    scope = cfg["scope"]
+    variants = list(PROMPT_VARIANTS[scope])
+    current = cfg.get("variant") if cfg.get("variant") in variants else variants[0]
+    chosen = choose_from_list(f"Variante de prompt (scope: {scope})", variants, current)
+    cfg["variant"] = chosen
+
+
+def compare_prompts(cfg):
+    """Corre el comparador A/B de prompts sobre la imagen actual."""
+    scope = cfg["scope"]
+    runs = ask(f"Runs por variante (Enter = 2): ")
+    runs = int(runs) if runs.isdigit() else 2
+    run_prompt_test([cfg["image"]], scope, list(PROMPT_VARIANTS[scope]),
+                    cfg["model"], runs=runs, max_tokens=cfg["max_tokens"],
+                    think=cfg["think"], url=cfg["url"], num_ctx=cfg["num_ctx"])
+
+
 def toggle_think(cfg):
     cfg["think"] = not cfg["think"]
     if cfg["think"]:
@@ -158,6 +179,7 @@ def show_config(cfg):
     print(f"  Imagen (smoke)    : {cfg['image']}")
     print(f"  Carpeta (bench)   : {cfg['folder']}")
     print(f"  Modo detección    : {cfg['scope']} ({SCOPES[cfg['scope']]['label']})")
+    print(f"  Variante prompt   : {cfg.get('variant', '(default)')}")
     print(f"  Razonamiento think: {'ON' if cfg['think'] else 'OFF'}")
     print(f"  max_tokens (salida): {cfg['max_tokens']}")
     print(f"  num_ctx (ventana) : {cfg['num_ctx']}")
@@ -177,15 +199,17 @@ MENU = """
 │  ANALIZAR                                      │
 │   1) Smoke test (1 imagen)                     │
 │   2) Benchmark (carpeta, P50/P95, JSON%)       │
+│   3) Comparar prompts (A/B: velocidad/JSON)    │
 │                                                │
 │  CONFIGURAR (se guarda en config.json)         │
-│   3) Modelo                                    │
-│   4) Imagen                                    │
-│   5) Modo de detección (industrial / todo)     │
-│   6) Razonamiento think (ON/OFF)               │
-│   7) max_tokens / num_ctx                      │
-│   8) Ajustes del benchmark (runs / modelos)    │
-│   9) Ver config actual                         │
+│   4) Modelo                                    │
+│   5) Imagen                                    │
+│   6) Modo de detección (industrial / todo)     │
+│   7) Variante de prompt                        │
+│   8) Razonamiento think (ON/OFF)               │
+│   9) max_tokens / num_ctx                      │
+│  10) Ajustes del benchmark (runs / modelos)    │
+│  11) Ver config actual                         │
 │                                                │
 │   0) Salir                                     │
 └────────────────────────────────────────────────┘"""
@@ -203,26 +227,33 @@ def main():
             save_config(cfg)
             run_smoke(cfg["image"], cfg["model"], scope=cfg["scope"],
                       max_tokens=cfg["max_tokens"], think=cfg["think"],
-                      url=cfg["url"], num_ctx=cfg["num_ctx"])
+                      url=cfg["url"], num_ctx=cfg["num_ctx"],
+                      variant=cfg.get("variant"))
         elif choice == "2":
             save_config(cfg)
             run_benchmark(cfg["folder"], cfg["benchmark_models"],
                           runs=cfg["benchmark_runs"], scope=cfg["scope"],
                           max_tokens=cfg["max_tokens"], think=cfg["think"],
-                          url=cfg["url"], num_ctx=cfg["num_ctx"])
+                          url=cfg["url"], num_ctx=cfg["num_ctx"],
+                          variant=cfg.get("variant"))
         elif choice == "3":
-            pick_model(cfg); save_config(cfg)
+            save_config(cfg)
+            compare_prompts(cfg)
         elif choice == "4":
-            pick_image(cfg); save_config(cfg)
+            pick_model(cfg); save_config(cfg)
         elif choice == "5":
-            pick_scope(cfg); save_config(cfg)
+            pick_image(cfg); save_config(cfg)
         elif choice == "6":
-            toggle_think(cfg); save_config(cfg)
+            pick_scope(cfg); save_config(cfg)
         elif choice == "7":
-            set_max_tokens(cfg); save_config(cfg)
+            pick_variant(cfg); save_config(cfg)
         elif choice == "8":
-            benchmark_settings(cfg); save_config(cfg)
+            toggle_think(cfg); save_config(cfg)
         elif choice == "9":
+            set_max_tokens(cfg); save_config(cfg)
+        elif choice == "10":
+            benchmark_settings(cfg); save_config(cfg)
+        elif choice == "11":
             show_config(cfg)
         elif choice == "0" or choice.lower() in ("q", "salir", "exit"):
             save_config(cfg)

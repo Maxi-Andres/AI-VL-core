@@ -1,8 +1,9 @@
 {
   "model": "qwen3-vl:4b",
-  "image": "fotosClean/20.jpeg",
+  "image": "fotosClean/4.jpeg",
   "folder": "fotosClean",
   "scope": "industrial",
+  "variant": "v2_antiloop",
   "max_tokens": 8192,
   "num_ctx": 16384,
   "think": true,
