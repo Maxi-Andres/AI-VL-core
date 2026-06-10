@@ -1,5 +1,7 @@
 - intentar evitar que el modelo piense, quiza fijate otra version o en hugging face, el │ qwen3-vl:4b │ piensa siempre aunque lo saques
-- proba con ollama en consola de una si te permite sacar el think
+- proba con ollama en consola de una si te permite sacar el think NO, piensa igual siempre se necesita el modelo no think
+
+- !FIJATE de mas adelante cuando este el robot y tenga que pensar mas si quiza combiene alternar entre ambos modelos, el instruct y el thinking dependiendo la tarea, ademas de usar yolo 
 
 - creo que hay un cuello de botella, cuando analizas una foto como que tarda mas, pero despues si haces la segunda tarda menos
 como que tarda el primer intento por que le cargas el modelo a la GPU? se podra implementar algo para que este siempre cargado? 
@@ -12,16 +14,21 @@ el tiempo desde que toco enter hasta que veo como imprime lo que piensa y tambie
 - pasa todo el codigo a ingles
 - hace un front real para no usar mas la consola fijate si podes hacer que python sea el back end
 
-- provar que onda YOLOv8 o v11 quiza son mas rapidos o podes usar eso para hacer rapido y despues los vl para el movimiento de el robot y las respuestas a comandos de voz
-
+- !provar que onda YOLOv8 o v11 quiza son mas rapidos o podes usar eso para hacer rapido y despues los vl para el movimiento de el robot y las respuestas a comandos de voz
 
 - que este la mejor config y la actual, y una manera de pasar la actual a la mejor, luego de pruebas y tocar cosas, y tambien una manera de guardar la mejor si hay una mejor
 
 
-
+------------------------------------------------------------------------------------------------------------------------------------------------
 
 Diferencia entre max_tokens y num_ctx
 
 - num_ctx = la ventana de contexto completa: todo lo que entra (system + prompt + tokens de la imagen) + todo lo que sale (razonamiento + respuesta). Es el número que ves en ollama ps. Más num_ctx → la imagen entra a más resolución (más detalle) pero el prefill es más lento. Por eso "más contexto = más lento".
 - max_tokens (= num_predict) = el tope de lo que el modelo genera (razonamiento + respuesta). Si lo alcanza, corta → finish_reason: length y el content puede venir vacío.
 - Cómo se combinan: la salida real disponible es min(max_tokens, num_ctx − tokens_de_entrada). Los dos tienen que alcanzar: si max_tokens es chico corta aunque sobre num_ctx; si num_ctx es chico, la imagen le come lugar a la respuesta y también se traba. Por eso "poco contexto se traba, mucho contexto va lento" — hay que encontrar el punto medio (8192 / 4096 funcionó bien acá).
+
+------------------------------------------------------------------------------------------------------------------------------------------------
+
+⚠️ Lo que hay que confirmar al revisar
+
+Las claves del JSON ahora son inglés (objects/type/…). Eso es el contrato VLM→VLA que consume el "Silk AI Proxy Gateway / F1.9": el consumidor downstream tiene que actualizarse para leer las claves nuevas, si no, se rompe. Lo dejé anotado en CLAUDE.md también. Como vos revisás antes de usar/commitear, lo verificás ahí.

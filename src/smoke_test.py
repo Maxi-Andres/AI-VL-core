@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-smoke_test.py — Validación rápida del VLM sobre una imagen del lab.
+smoke_test.py — Quick VLM validation on a single lab image.
 
-Manda una imagen al endpoint NATIVO de Ollama (/api/chat, vía vlm_common) y pide
-identificar objetos devolviendo JSON con bounding boxes. El contrato JSON es el
-que va a consumir el Silk AI Proxy Gateway / F1.9.
+Sends an image to Ollama's NATIVE endpoint (/api/chat, via vlm_common) and asks
+it to identify objects, returning JSON with bounding boxes. The JSON contract is
+the one consumed by the Silk AI Proxy Gateway / F1.9.
 
-¿No querés escribir flags? Corré `python3 menu.py` (menú interactivo).
+Don't want to type flags? Run `python3 menu.py` (interactive menu).
 
-Requisitos:  pip install requests
-Uso:
+Requirements:  pip install requests
+Usage:
     python3 src/smoke_test.py fotos/clean/2.jpeg
     python3 src/smoke_test.py fotos/clean/2.jpeg --model qwen3-vl:8b
-    python3 src/smoke_test.py fotos/clean/2.jpeg --scope todo --think
+    python3 src/smoke_test.py fotos/clean/2.jpeg --scope all --think
 """
 import argparse
 import sys
@@ -32,26 +32,26 @@ from vlm_common import (
 
 def run_smoke(image, model, scope="industrial", max_tokens=8192,
               think=True, url=OLLAMA_HOST, num_ctx=16384, variant=None):
-    """Corre el smoke test sobre una imagen e imprime el resultado.
+    """Run the smoke test on a single image and print the result.
 
-    Con think=True imprime EN VIVO lo que el modelo va razonando (verbose).
-    `variant` elige la variante de prompt (ver PROMPT_VARIANTS); None = default del scope.
+    With think=True it prints the model's reasoning LIVE (verbose).
+    `variant` selects the prompt variant (see PROMPT_VARIANTS); None = scope default.
     """
     try:
         img_b64 = encode_image(image)
     except FileNotFoundError:
-        print(f"[ERROR] No encuentro la imagen: {image}", file=sys.stderr)
+        print(f"[ERROR] Image not found: {image}", file=sys.stderr)
         return False
 
-    print(f"[..] Enviando '{image}' al modelo '{model}' "
-          f"(modo: {scope}, prompt: {variant or 'default'}) ...")
+    print(f"[..] Sending '{image}' to model '{model}' "
+          f"(mode: {scope}, prompt: {variant or 'default'}) ...")
     try:
         res = query_vlm(img_b64, model, scope=scope, max_tokens=max_tokens,
                         think=think, url=url, timeout=300, num_ctx=num_ctx,
                         verbose=True, size=image_size(image), variant=variant)
     except requests.RequestException as e:
-        print(f"[ERROR] Falló la request a Ollama: {e}", file=sys.stderr)
-        print("        ¿Está corriendo el servicio? curl http://localhost:11434/api/version")
+        print(f"[ERROR] Request to Ollama failed: {e}", file=sys.stderr)
+        print("        Is the service running? curl http://localhost:11434/api/version")
         return False
 
     render_result(model, res)
@@ -59,28 +59,28 @@ def run_smoke(image, model, scope="industrial", max_tokens=8192,
 
 
 def main():
-    cfg = load_config()  # los defaults salen de config.json
-    ap = argparse.ArgumentParser(description="Smoke test del VLM sobre una imagen.")
+    cfg = load_config()  # defaults come from config.json
+    ap = argparse.ArgumentParser(description="VLM smoke test on a single image.")
     ap.add_argument("image", nargs="?", default=cfg["image"],
-                    help="Ruta a la imagen (jpg/png). Default: el de config.json")
+                    help="Path to the image (jpg/png). Default: the one in config.json")
     ap.add_argument("--model", default=cfg["model"],
-                    help="Modelo de Ollama (4b entra 100%% en 8GB de VRAM; "
-                         "el 8b se parte CPU/GPU y es ~3x más lento)")
+                    help="Ollama model (4b fits 100%% in 8GB of VRAM; "
+                         "the 8b splits CPU/GPU and is ~3x slower)")
     ap.add_argument("--scope", choices=list(SCOPES), default=cfg["scope"],
-                    help="Modo de detección: industrial (solo instrumentos) | todo (cualquier objeto)")
+                    help="Detection mode: industrial (instruments only) | all (any object)")
     ap.add_argument("--variant", default=cfg.get("variant"),
-                    help="Variante de prompt (ej. v1_original, v2_antiloop). "
-                         "Default: el de config.json. Las variantes se comparan "
-                         "con python3 src/benchmark.py --variants ...")
+                    help="Prompt variant (e.g. v1_original, v2_antiloop). "
+                         "Default: the one in config.json. Variants are compared "
+                         "with python3 src/benchmark.py --variants ...")
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
-                    help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")
+                    help="OUTPUT token cap / num_predict (includes reasoning)")
     ap.add_argument("--num-ctx", type=int, default=cfg.get("num_ctx", 16384),
-                    help="Ventana de contexto (entrada+salida); la que ves en `ollama ps`")
+                    help="Context window (input+output); the one you see in `ollama ps`")
     ap.add_argument("--think", dest="think", action="store_true", default=cfg["think"],
-                    help="Razonamiento del modelo + impresión en vivo (default ON)")
+                    help="Model reasoning + live printing (default ON)")
     ap.add_argument("--no-think", dest="think", action="store_false",
-                    help="Pedir think=false (en qwen3-vl no lo apaga del todo, sólo lo acorta)")
+                    help="Request think=false (on qwen3-vl it doesn't fully disable it, only shortens it)")
     args = ap.parse_args()
 
     ok = run_smoke(args.image, args.model, scope=args.scope,

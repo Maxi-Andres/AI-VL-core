@@ -4,7 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A PoC harness for evaluating vision-language models (VLMs) served by **Ollama** for industrial inspection (mining / oil & gas). The VLM is prompted in Spanish (Rioplatense) to detect instruments/objects and return structured JSON with normalized bounding boxes. The JSON contract is meant to feed a downstream VLA stage and is consumed in production by the "Silk AI Proxy Gateway / F1.9".
+A PoC harness for evaluating vision-language models (VLMs) served by **Ollama** for industrial inspection (mining / oil & gas). The VLM detects instruments/objects and returns structured JSON with normalized bounding boxes. The JSON contract is meant to feed a downstream VLA stage and is consumed in production by the "Silk AI Proxy Gateway / F1.9".
+
+## Code conventions
+
+- **Everything in this repo is in English — absolutely everything**: comments, docstrings, identifiers/function names, all user-facing strings (menu text, prints, argparse help, table headers), the README, the VLM prompts, and the JSON output keys. **The only file that must NOT be translated/touched is `FIX.txt`.** The user converses in Spanish (Rioplatense) — that's fine for chat only; never reintroduce Spanish into the code or docs.
+- The VLM→VLA JSON contract was **also translated to English** (it used to be Spanish): output keys are now `objects`, `type`, `description`, `reading`, `confidence`, `bbox`; the `type` family enum values are `pressure|temperature|flow|level|electrical|analysis|control|vibration|valve|ppe|other`. The second detection scope was renamed `todo` → `all`. NOTE: this is an external contract consumed downstream by "Silk AI Proxy Gateway / F1.9" — the downstream consumer must be updated to match these English keys.
+- **NEVER run `git commit` or `git push`.** The user reviews every change manually before committing themselves. Make edits, verify, report — leave committing to the user.
 
 ## Commands
 
@@ -42,7 +48,14 @@ The smoke-test default is `qwen3-vl:4b` (not 8b) because of VRAM. On an 8 GB GPU
 - `qwen3-vl:4b` / `:8b` — capability `thinking`, renderer `qwen3-vl-thinking`. **Always reasons**; passing `"think": false` is silently **ignored** on 0.30.6 (the renderer still emits a full `<think>` block — confirmed: `think:false` produced *more* reasoning than `think:true`, i.e. pure variance).
 - `qwen2.5vl:7b` — **no** `thinking` capability. Never reasons, and sending `"think": true` returns **HTTP 400 `"does not support thinking"`**. So the flag must be **omitted** for such models or the request fails (this previously made the whole qwen2.5vl benchmark error out at 100%).
 
-So `vlm_common.model_supports_thinking()` queries `/api/show` (cached) and `query_vlm` only includes `think` in the payload when the model supports it. The real lever for "no reasoning" is **model choice** (use `qwen2.5vl:7b`); turning off `qwen3-vl`'s reasoning needs a different Ollama version. `query_vlm` returns `think_requested` / `thinking_supported` / `did_think`; `describe_thinking()` turns those into an honest one-liner shown by the smoke test, and the benchmark prints which models reason and which don't. Since `qwen3-vl` always reasons, the real failure mode is **token starvation**: if reasoning consumes the whole output budget, `content` comes back **empty** with `finish_reason: "length"`. The fix is budget — give it room with `--max-tokens` (`num_predict`) **and** `--num-ctx`.
+So `vlm_common.model_supports_thinking()` queries `/api/show` (cached) and `query_vlm` only includes `think` in the payload when the model supports it. `query_vlm` returns `think_requested` / `thinking_supported` / `did_think`; `describe_thinking()` turns those into an honest one-liner shown by the smoke test, and the benchmark prints which models reason and which don't. Since `qwen3-vl` thinking always reasons, its real failure mode is **token starvation**: if reasoning consumes the whole output budget, `content` comes back **empty** with `finish_reason: "length"`. The fix is budget — give it room with `--max-tokens` (`num_predict`) **and** `--num-ctx`.
+
+**The real reasoning switch is model choice — and Qwen3-VL ships as two separate checkpoints, not a flag.** Qwen publishes `Qwen3-VL-*-Thinking` (always reasons) and `Qwen3-VL-*-Instruct` (never reasons) as different weights. Ollama's `qwen3-vl:4b` is the **Thinking** checkpoint (same blob id as `qwen3-vl:4b-thinking`, `1343d82ebee3`). The **Instruct** sibling is in Ollama's registry too. So to actually toggle reasoning within the same family, switch models — no Ollama upgrade needed:
+- `qwen3-vl:4b-instruct` (= `-instruct-q4_K_M`, 3.3 GB) — no `thinking` capability → never reasons, fits 100% on the 8 GB GPU. **Recommended primary for the PoC** (faster, no token starvation, structured-JSON task doesn't benefit from chain-of-thought).
+- `qwen3-vl:4b-thinking` (= `qwen3-vl:4b`) — keep for comparison / ambiguous images.
+- Quantization on 8 GB: prefer `q4_K_M` (3.3 GB, 100% GPU). `q8_0` (5.1 GB) fits tightly — verify with `ollama ps`. `bf16` (8.9 GB) does NOT fit (CPU/GPU split → slow). `qwen2.5vl:7b` is a different (older) generation with no `thinking` capability.
+
+Because the benchmark sweeps `--models`, comparing thinking-vs-instruct (and quantizations) is just `python3 src/benchmark.py fotos/clean --models qwen3-vl:4b-instruct qwen3-vl:4b-thinking`. See README "Modelos (Ollama)" for the full variant table.
 
 Two knobs, and they interact:
 - **`max_tokens` / `num_predict`** = ceiling on tokens the model **generates** (thinking + answer).
@@ -66,10 +79,10 @@ Both scripts hit Ollama's **native** endpoint (`/api/chat`) with `stream: true`,
 ### Detection scopes
 
 Two modes, both keyed in `SCOPES`:
-- `industrial` — open detection of **any** industrial instrument. `tipo` is a coarse family (`presion|temperatura|caudal|nivel|electrica|analisis|control|vibracion|valvula|epp|otro`) and `descripcion` is free text for the specifics. The prompt lists per-family examples (manómetro, termopar, caudalímetro Coriolis, sensor radar, etc.) as *reference, not a closed list*, and tells the model not to over-deliberate on the category — this is what stops it from burning reasoning tokens deciding where a flow meter "belongs".
-- `todo` — any object, free-form `tipo`. Looser; output varies more between runs.
+- `industrial` — open detection of **any** industrial instrument. `type` is a coarse family (`pressure|temperature|flow|level|electrical|analysis|control|vibration|valve|ppe|other`) and `description` is free text for the specifics. The prompt lists per-family examples (pressure gauge, thermocouple, Coriolis flow meter, radar sensor, etc.) as *reference, not a closed list*, and tells the model not to over-deliberate on the category — this is what stops it from burning reasoning tokens deciding where a flow meter "belongs".
+- `all` — any object, free-form `type`. Looser; output varies more between runs.
 
-An empty `{"objetos": []}` means the model genuinely saw nothing matching the scope — not a parsing bug. (Earlier `industrial` empties on thermometer/sensor images were the taxonomy being too narrow, since fixed.)
+An empty `{"objects": []}` means the model genuinely saw nothing matching the scope — not a parsing bug. (Earlier `industrial` empties on thermometer/sensor images were the taxonomy being too narrow, since fixed.)
 
 ### config.json
 
