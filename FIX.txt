@@ -63,3 +63,5 @@ que este la mejor config y la actual, y una manera de pasar la actual a la mejor
 pasar todo a ingles
 
 intentar que no piense
+
+que te bajes el repo instales dependencias y funcione
