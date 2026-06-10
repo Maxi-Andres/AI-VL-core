@@ -51,6 +51,7 @@ from vlm_common import (
     image_size,
     list_images,
     load_config,
+    model_supports_thinking,
     progress_bar,
     query_vlm,
     results_path,
@@ -65,6 +66,50 @@ def pctl(values, p):
     f = int(k)
     c = min(f + 1, len(s) - 1)
     return s[f] + (s[c] - s[f]) * (k - f)
+
+
+def dedup(seq):
+    """Quita duplicados preservando el orden de aparición."""
+    seen, out = set(), []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def as_list(v, fallback):
+    """Normaliza un valor (escalar o lista) a una lista no vacía y sin duplicados.
+
+    Sirve para que las dimensiones del barrido (max_tokens, num_ctx, think) acepten
+    tanto un solo valor como una lista. Si queda vacía, usa `fallback` (lista).
+    """
+    if v is None:
+        items = []
+    elif isinstance(v, (list, tuple)):
+        items = list(v)
+    else:
+        items = [v]
+    items = dedup(items)
+    return items or list(fallback)
+
+
+def parse_bool(s):
+    """Convierte 'true/false/on/off/1/0/yes/no/si' (o un bool) a bool. None si no entiende."""
+    if isinstance(s, bool):
+        return s
+    t = str(s).strip().lower()
+    if t in ("true", "on", "1", "yes", "si", "sí", "y"):
+        return True
+    if t in ("false", "off", "0", "no", "n"):
+        return False
+    return None
+
+
+def combo_label(c):
+    """Etiqueta compacta y única de una combinación del barrido."""
+    return (f"{c['model']} [{c['variant']}] "
+            f"ctx{c['num_ctx']} max{c['max_tokens']} think{'1' if c['think'] else '0'}")
 
 
 def _stats(latencies, valid, trunc, objs, errors, total):
@@ -87,17 +132,21 @@ def _stats(latencies, valid, trunc, objs, errors, total):
 def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
                   think=True, url=OLLAMA_HOST, num_ctx=8192, variants=None,
                   out=None):
-    """Corre el benchmark sobre una LISTA de imágenes barriendo modelos × variantes.
+    """Corre el benchmark barriendo el producto modelos × prompts × max_tokens × num_ctx × think.
 
-    `images`   : lista de rutas concretas (ya elegidas). Si tenés una carpeta,
-                 expandila antes con vlm_common.list_images().
-    `models`   : lista de modelos de Ollama a comparar.
-    `variants` : lista de variantes de prompt a comparar (claves de PROMPT_VARIANTS
-                 para el scope). Vacío/None -> la variante por defecto del scope.
+    `images`     : lista de rutas concretas (ya elegidas). Si tenés una carpeta,
+                   expandila antes con vlm_common.list_images().
+    `models`     : lista de modelos de Ollama a comparar.
+    `variants`   : lista de variantes de prompt (claves de PROMPT_VARIANTS para el
+                   scope). Vacío/None -> la variante por defecto del scope.
+    `max_tokens` : escalar o LISTA de topes de salida a comparar.
+    `num_ctx`    : escalar o LISTA de ventanas de contexto a comparar.
+    `think`      : escalar o LISTA de bools a comparar (sirve cuando consigas un
+                   modelo que SÍ respete el flag; ver model_supports_thinking()).
 
-    Imprime tiempos + JSON% + cortes + objetos por cada combinación y un veredicto
-    final. Devuelve el dict de resultados (también lo guarda en `out`, dentro de
-    results/ si no se pasa una ruta).
+    Cada combinación es una fila del reporte. Imprime tiempos + JSON% + cortes +
+    objetos por combinación y un veredicto final. Devuelve el dict de resultados
+    (también lo guarda en `out`, dentro de results/ si no se pasa una ruta).
     """
     images = [p for p in images if os.path.exists(p)]
     if not images:
@@ -109,22 +158,46 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
 
     # Normalizar variantes: validar contra el scope y caer al default si hace falta.
     valid_variants = list(PROMPT_VARIANTS[scope])
-    variants = [v for v in (variants or []) if v in valid_variants]
+    variants = dedup([v for v in (variants or []) if v in valid_variants])
     if not variants:
         variants = [DEFAULT_VARIANT[scope]]
 
-    combos = [(m, v) for m in models for v in variants]
+    # Las otras tres dimensiones del barrido aceptan escalar o lista.
+    max_tokens_list = as_list(max_tokens, [4096])
+    num_ctx_list = as_list(num_ctx, [8192])
+    think_list = dedup([bool(t) for t in as_list(think, [True])])
+
+    # Producto cartesiano de TODAS las dimensiones (igual que modelos/prompts/fotos).
+    combos = [
+        {"model": m, "variant": v, "max_tokens": mt, "num_ctx": nc, "think": th}
+        for m in models
+        for v in variants
+        for mt in max_tokens_list
+        for nc in num_ctx_list
+        for th in think_list
+    ]
     total_calls = len(images) * runs * len(combos)
 
     print("=" * 72)
     print(" BENCHMARK VLM")
     print("=" * 72)
-    print(f"  Imágenes : {len(images)}  ->  {', '.join(os.path.basename(i) for i in images)}")
-    print(f"  Modelos  : {len(models)}  ->  {', '.join(models)}")
-    print(f"  Prompts  : {len(variants)}  ->  {', '.join(variants)}")
-    print(f"  Runs/img : {runs}     Modo: {scope}")
-    print(f"  Contexto : num_ctx={num_ctx}   max_tokens(salida)={max_tokens}   think={think}")
-    print(f"  Total de llamadas: {total_calls}  ({len(combos)} combinación/es modelo×prompt)")
+    print(f"  Imágenes  : {len(images)}  ->  {', '.join(os.path.basename(i) for i in images)}")
+    print(f"  Modelos   : {len(models)}  ->  {', '.join(models)}")
+    print(f"  Prompts   : {len(variants)}  ->  {', '.join(variants)}")
+    print(f"  max_tokens: {', '.join(str(x) for x in max_tokens_list)}")
+    print(f"  num_ctx   : {', '.join(str(x) for x in num_ctx_list)}")
+    print(f"  think     : {', '.join('ON' if t else 'OFF' for t in think_list)}")
+    print(f"  Runs/img  : {runs}     Modo: {scope}")
+    # El flag `think` solo aplica a modelos con capability 'thinking'. Avisamos la
+    # realidad: qwen3-vl siempre razona (ignora think=OFF en 0.30.6); qwen2.5vl nunca.
+    thinkers = [m for m in models if model_supports_thinking(m, url)]
+    nonthinkers = [m for m in models if m not in thinkers]
+    if thinkers:
+        print(f"  Razonan   : {', '.join(thinkers)}  (siempre; el flag think=OFF se ignora)")
+    if nonthinkers:
+        print(f"  No razonan : {', '.join(nonthinkers)}  (sin capability 'thinking'; OFF real)")
+    print(f"  Total de llamadas: {total_calls}  ({len(combos)} combinación/es "
+          f"modelo×prompt×max_tokens×num_ctx×think)")
     print("=" * 72 + "\n")
 
     encoded = {p: encode_image(p) for p in images}
@@ -134,10 +207,14 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
     done = 0
     bench_t0 = time.perf_counter()
 
-    for model, variant in combos:
-        combo_label = f"{model} [{variant}]"
-        print(f"=== Modelo: {model}  |  Prompt: {variant} ===")
+    for combo in combos:
+        model, variant = combo["model"], combo["variant"]
+        label = combo_label(combo)
+        print(f"=== Modelo: {model}  |  Prompt: {variant}  |  "
+              f"ctx={combo['num_ctx']} max_tokens={combo['max_tokens']} "
+              f"think={'ON' if combo['think'] else 'OFF'} ===")
         latencies, valid, errors, total, trunc, objs = [], 0, 0, 0, 0, []
+        thought = 0  # cuántas veces el modelo razonó de verdad
         per_image = {}  # img -> lista de latencias
         for img in images:
             name = os.path.basename(img)
@@ -149,12 +226,13 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
                 avg_so_far = statistics.mean(latencies) if latencies else 0.0
                 eta = avg_so_far * (total_calls - done + 1)
                 progress_bar(done - 1, total_calls,
-                             suffix=f"{combo_label} | {name} run {r}/{runs} | "
+                             suffix=f"{label} | {name} run {r}/{runs} | "
                                     f"prom {fmt_secs(avg_so_far)} | ETA {fmt_secs(eta)}")
                 try:
                     res = query_vlm(encoded[img], model, scope=scope,
-                                    max_tokens=max_tokens, think=think, url=url,
-                                    num_ctx=num_ctx, size=sizes[img], variant=variant)
+                                    max_tokens=combo["max_tokens"], think=combo["think"],
+                                    url=url, num_ctx=combo["num_ctx"], size=sizes[img],
+                                    variant=variant)
                     latencies.append(res["elapsed"])
                     per_image[name].append(res["elapsed"])
                     if res["ok"]:
@@ -163,6 +241,8 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
                             objs.append(len(res["parsed"].get("objetos", [])))
                     if res["finish_reason"] == "length":
                         trunc += 1
+                    if res.get("did_think"):
+                        thought += 1
                 except requests.RequestException as e:
                     errors += 1
                     progress_bar(done, total_calls, suffix=f"ERROR en {name}")
@@ -172,12 +252,12 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
             avg_so_far = statistics.mean(latencies) if latencies else 0.0
             eta = avg_so_far * (total_calls - done)
             progress_bar(done, total_calls,
-                         suffix=f"{combo_label} | hecho {name} | prom {fmt_secs(avg_so_far)} | "
+                         suffix=f"{label} | hecho {name} | prom {fmt_secs(avg_so_far)} | "
                                 f"ETA {fmt_secs(eta)}")
-        progress_bar(done, total_calls, suffix=f"{combo_label} completo")
+        progress_bar(done, total_calls, suffix=f"{label} completo")
 
         # Tabla por imagen de esta combinación (tiempo medio por imagen).
-        print(f"\n  Tiempo por imagen ({combo_label}):")
+        print(f"\n  Tiempo por imagen ({label}):")
         for name, lats in per_image.items():
             if lats:
                 print(f"    {name:28s} prom {fmt_secs(statistics.mean(lats)):>7s}  "
@@ -188,23 +268,30 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
         stats = _stats(latencies, valid, trunc, objs, errors, total)
         stats["model"] = model
         stats["variant"] = variant
-        results[combo_label] = stats
+        stats["max_tokens"] = combo["max_tokens"]
+        stats["num_ctx"] = combo["num_ctx"]
+        stats["think"] = combo["think"]
+        stats["thinking_supported"] = model_supports_thinking(model, url)
+        stats["thought"] = thought  # cuántas corridas razonaron de verdad
+        results[label] = stats
         print()
 
     bench_wall = time.perf_counter() - bench_t0
 
     # ---------------- Resumen comparativo + tiempos ----------------
-    print("=" * 102)
-    print(f"{'Modelo':16s} {'Prompt':14s} {'P50':>7s} {'P95':>7s} {'Media':>7s} "
-          f"{'Min':>7s} {'Max':>7s} {'Total':>8s} {'JSON%':>7s} {'Cortes':>7s} "
-          f"{'~obj':>6s} {'Errs':>5s}")
-    print("-" * 102)
+    header = (f"{'Modelo':16s} {'Prompt':13s} {'ctx':>6s} {'maxtok':>6s} {'thk':>3s} "
+              f"{'P50':>7s} {'P95':>7s} {'Media':>7s} {'Min':>7s} {'Max':>7s} "
+              f"{'Total':>8s} {'JSON%':>7s} {'Cortes':>6s} {'~obj':>5s} {'Errs':>5s}")
+    print("=" * len(header))
+    print(header)
+    print("-" * len(header))
     for r in results.values():
-        print(f"{r['model']:16s} {r['variant']:14s} {fmt_secs(r['p50']):>7s} "
+        print(f"{r['model']:16s} {r['variant']:13s} {r['num_ctx']:>6d} {r['max_tokens']:>6d} "
+              f"{('ON' if r['think'] else 'OFF'):>3s} {fmt_secs(r['p50']):>7s} "
               f"{fmt_secs(r['p95']):>7s} {fmt_secs(r['mean']):>7s} {fmt_secs(r['min']):>7s} "
               f"{fmt_secs(r['max']):>7s} {fmt_secs(r['total_time']):>8s} {r['json_rate']:6.1f}% "
-              f"{r['truncadas']:7d} {r['avg_objetos']:6.1f} {r['errors']:5d}")
-    print("=" * 102)
+              f"{r['truncadas']:6d} {r['avg_objetos']:5.1f} {r['errors']:5d}")
+    print("=" * len(header))
     print(f"Tiempo total del benchmark (reloj): {fmt_secs(bench_wall)}  "
           f"|  {total_calls} llamadas")
     print("Objetivo del doc (F1.8): P95 < 1.5 s on-prem, tasa JSON alta para VLM->VLA.")
@@ -219,12 +306,13 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
             tag = "más rápida con JSON confiable" if usable else "más rápida (¡ojo con el JSON%!)"
             r = results[best]
             print(f"-> Mejor combinación: {best} ({tag}).")
-            print(f"   Para dejar esa prompt activa: poné \"variant\": \"{r['variant']}\" "
-                  f"en config.json (o cambiá DEFAULT_VARIANT en src/vlm_common.py).")
+            print(f"   Para fijarla en config.json: \"model\"={r['model']!r}, "
+                  f"\"variant\"={r['variant']!r}, \"max_tokens\"={r['max_tokens']}, "
+                  f"\"num_ctx\"={r['num_ctx']}, \"think\"={str(r['think']).lower()}.")
 
     payload = {"config": {"runs": runs, "scope": scope, "variants": variants,
-                          "models": models, "max_tokens": max_tokens,
-                          "num_ctx": num_ctx, "think": think,
+                          "models": models, "max_tokens": max_tokens_list,
+                          "num_ctx": num_ctx_list, "think": think_list,
                           "images": [os.path.basename(i) for i in images],
                           "total_wall_s": round(bench_wall, 2)},
                "results": results}
@@ -255,17 +343,16 @@ def main():
                     default=cfg.get("benchmark_scope", cfg["scope"]),
                     help="Modo de detección: industrial | todo")
     ap.add_argument("--url", default=cfg["url"])
-    ap.add_argument("--max-tokens", type=int,
-                    default=cfg.get("benchmark_max_tokens", 4096),
-                    help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")
-    ap.add_argument("--num-ctx", type=int,
-                    default=cfg.get("benchmark_num_ctx", 8192),
-                    help="Ventana de contexto (entrada+salida); la que ves en `ollama ps`")
-    ap.add_argument("--think", dest="think", action="store_true",
-                    default=cfg.get("benchmark_think", cfg["think"]),
-                    help="Razonamiento del modelo (default ON)")
-    ap.add_argument("--no-think", dest="think", action="store_false",
-                    help="Pedir think=false")
+    ap.add_argument("--max-tokens", nargs="+", type=int,
+                    default=cfg.get("benchmark_max_tokens", [4096]),
+                    help="Uno o VARIOS topes de tokens de SALIDA / num_predict a comparar "
+                         "(ej. --max-tokens 4096 8192)")
+    ap.add_argument("--num-ctx", nargs="+", type=int,
+                    default=cfg.get("benchmark_num_ctx", [8192]),
+                    help="Una o VARIAS ventanas de contexto a comparar (ej. --num-ctx 8192 16384)")
+    ap.add_argument("--think", nargs="+", default=cfg.get("benchmark_think", [True]),
+                    help="Uno o VARIOS valores de razonamiento a comparar: true/false "
+                         "(ej. --think true false). Solo aplica a modelos con capability 'thinking'.")
     args = ap.parse_args()
 
     # Validar variantes contra el scope elegido.
@@ -275,6 +362,13 @@ def main():
         print(f"[ERROR] Variante(s) desconocida(s) para scope '{args.scope}': {unknown}",
               file=sys.stderr)
         print(f"        Disponibles: {valid_variants}", file=sys.stderr)
+        sys.exit(1)
+
+    # Parsear los valores de think (true/false/...). None = no se entendió.
+    think_vals = [parse_bool(t) for t in (args.think if isinstance(args.think, list) else [args.think])]
+    if any(t is None for t in think_vals):
+        print(f"[ERROR] Valor(es) de --think inválido(s): {args.think}. Usá true/false.",
+              file=sys.stderr)
         sys.exit(1)
 
     all_imgs = list_images(args.folder)
@@ -289,7 +383,7 @@ def main():
         images = all_imgs
 
     res = run_benchmark(images, args.models, runs=args.runs, scope=args.scope,
-                        max_tokens=args.max_tokens, think=args.think, url=args.url,
+                        max_tokens=args.max_tokens, think=think_vals, url=args.url,
                         num_ctx=args.num_ctx, variants=args.variants)
     sys.exit(0 if res else 1)
 

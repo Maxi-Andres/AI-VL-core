@@ -29,6 +29,7 @@ from vlm_common import (
     SCOPES,
     list_images,
     load_config,
+    model_supports_thinking,
     save_config,
 )
 from smoke_test import run_smoke
@@ -123,6 +124,15 @@ def choose_multi(title, options, current):
 # --------------------------------------------------------------------------- #
 # Acciones de CONFIG (smoke test)
 # --------------------------------------------------------------------------- #
+def think_note(model, url):
+    """Una línea diciendo si ESE modelo razona (capability 'thinking') o no."""
+    if model_supports_thinking(model, url):
+        return (f"  ℹ '{model}' SÍ razona (capability 'thinking'). OJO: en qwen3-vl + "
+                f"Ollama 0.30.6 el flag think=OFF se ignora, siempre razona.")
+    return (f"  ℹ '{model}' NO razona (sin capability 'thinking'): el razonamiento "
+            f"queda OFF de verdad. Es el modelo a usar si NO querés que piense.")
+
+
 def pick_model(cfg):
     models = list_ollama_models(cfg["url"])
     if not models:
@@ -130,6 +140,7 @@ def pick_model(cfg):
         cfg["model"] = ask(f"Modelo (actual: {cfg['model']}): ") or cfg["model"]
     else:
         cfg["model"] = choose_from_list("Modelo de Ollama", models, cfg["model"])
+    print(think_note(cfg["model"], cfg["url"]))
 
 
 def pick_image(cfg):
@@ -188,13 +199,67 @@ def set_ctx(cfg, mt_key="max_tokens", nc_key="num_ctx"):
         cfg[nc_key] = int(c)
 
 
-def toggle_think(cfg, key="think"):
+def toggle_think(cfg, key="think", models=None):
     cfg[key] = not cfg[key]
-    if cfg[key]:
-        print("-> Razonamiento (think): ON — se imprime en vivo lo que piensa el modelo.")
-    else:
-        print("-> Razonamiento (think): OFF — OJO: en qwen3-vl think=false NO lo apaga "
-              "del todo, sólo acorta el razonamiento.")
+    state = "ON" if cfg[key] else "OFF"
+    print(f"-> Razonamiento (think): {state}.")
+    # Decimos la verdad según los modelos en juego (el flag solo manda si el modelo lo soporta).
+    models = models or [cfg.get("model")]
+    thinkers = [m for m in models if m and model_supports_thinking(m, cfg["url"])]
+    nonthinkers = [m for m in models if m and m not in thinkers]
+    if thinkers:
+        print(f"   OJO: {', '.join(thinkers)} razona(n) por diseño (qwen3-vl). En Ollama "
+              f"0.30.6 el flag think=OFF NO lo apaga: van a razonar igual.")
+        print(f"   El interruptor REAL es el modelo: si NO querés que piense, usá uno sin "
+              f"'thinking' (ej. qwen2.5vl:7b).")
+    if nonthinkers:
+        print(f"   {', '.join(nonthinkers)} no tiene(n) 'thinking': nunca razona(n), "
+              f"queda OFF de verdad.")
+
+
+def as_list(v):
+    """Normaliza escalar/lista/None a lista (para configs viejas con valores sueltos)."""
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        return list(v)
+    return [v]
+
+
+def int_list(raw):
+    """'4096, 8192' o '4096 8192' -> [4096, 8192]. [] si no hay nada parseable."""
+    parts = raw.replace(",", " ").split()
+    return [int(p) for p in parts if p.lstrip("-").isdigit()]
+
+
+def bench_set_ctx(cfg):
+    """max_tokens / num_ctx del benchmark: aceptan VARIOS valores para compararlos."""
+    explain_ctx()
+    print("  (podés poner VARIOS valores separados por coma/espacio para compararlos,")
+    print("   ej: '4096 8192' corre las dos y las pone en la tabla)")
+    cur_mt = cfg.get("benchmark_max_tokens")
+    vals = int_list(ask(f"max_tokens a comparar (actual: {cur_mt}, Enter = dejar): "))
+    if vals:
+        cfg["benchmark_max_tokens"] = vals
+    cur_nc = cfg.get("benchmark_num_ctx")
+    vals = int_list(ask(f"num_ctx a comparar (actual: {cur_nc}, Enter = dejar): "))
+    if vals:
+        cfg["benchmark_num_ctx"] = vals
+
+
+def bench_pick_think(cfg):
+    """Qué valores de think comparar en el benchmark: ON, OFF, o ambos."""
+    print(f"\n¿Qué valores de razonamiento (think) comparar?  (actual: {cfg.get('benchmark_think')})")
+    print("  1) Solo ON")
+    print("  2) Solo OFF")
+    print("  3) Ambos (ON y OFF) — compara las dos en la misma corrida")
+    mapping = {"1": [True], "2": [False], "3": [True, False]}
+    sel = ask("Elegí número (Enter = dejar): ")
+    if sel in mapping:
+        cfg["benchmark_think"] = mapping[sel]
+    print("  ℹ recordá: el flag think solo cambia algo en modelos que lo soportan. "
+          "qwen3-vl ignora OFF (siempre razona); qwen2.5vl nunca razona. Esta dimensión "
+          "sirve sobre todo para cuando consigas un modelo que SÍ respete el flag.")
 
 
 def show_config(cfg):
@@ -216,8 +281,10 @@ def show_config(cfg):
     print(f"    Runs/imagen      : {cfg['benchmark_runs']}")
     variants = cfg.get("benchmark_variants") or [cfg.get("benchmark_variant")]
     print(f"    Modo / prompts   : {cfg.get('benchmark_scope')} / {', '.join(v for v in variants if v)}")
-    print(f"    think            : {'ON' if cfg.get('benchmark_think') else 'OFF'}")
-    print(f"    max_tokens/num_ctx: {cfg.get('benchmark_max_tokens')} / {cfg.get('benchmark_num_ctx')}")
+    think_vals = as_list(cfg.get("benchmark_think"))
+    print(f"    think a comparar : {['ON' if t else 'OFF' for t in think_vals]}")
+    print(f"    max_tokens (lista): {as_list(cfg.get('benchmark_max_tokens'))}")
+    print(f"    num_ctx (lista)  : {as_list(cfg.get('benchmark_num_ctx'))}")
     print(f"  URL Ollama         : {cfg['url']}")
     print("=" * 52)
 
@@ -252,6 +319,8 @@ def bench_pick_models(cfg):
     chosen = choose_multi("Modelos a comparar", models, cfg["benchmark_models"])
     if chosen:
         cfg["benchmark_models"] = chosen
+    for m in cfg["benchmark_models"]:
+        print(think_note(m, cfg["url"]))
 
 
 def bench_set_runs(cfg):
@@ -299,8 +368,8 @@ BENCH_MENU = """
 │   3) Runs por imagen                           │
 │   4) Modo de detección (industrial / todo)     │
 │   5) Prompts a comparar (1 o varias)           │
-│   6) max_tokens / num_ctx (contexto)           │
-│   7) Razonamiento think (ON/OFF)               │
+│   6) max_tokens / num_ctx (1 o varios c/u)     │
+│   7) think a comparar (ON / OFF / ambos)       │
 │                                                │
 │   8) ▶ CORRER BENCHMARK                        │
 │   0) Volver al menú principal                  │
@@ -315,10 +384,17 @@ def benchmark_menu(cfg):
         runs = cfg["benchmark_runs"]
         variants = cfg.get("benchmark_variants") or []
         n_models = len(cfg["benchmark_models"])
-        n_calls = n_img * runs * n_models * max(len(variants), 1)
-        print(f"\n  >> {n_img} img × {runs} runs × {n_models} modelo(s) × {len(variants)} prompt(s) "
-              f"= {n_calls} llamadas | num_ctx={cfg.get('benchmark_num_ctx')} "
-              f"max_tokens={cfg.get('benchmark_max_tokens')} | prompts={', '.join(variants)}")
+        # Las dimensiones de barrido pueden ser listas; contamos sus longitudes.
+        mt = as_list(cfg.get("benchmark_max_tokens"))
+        nc = as_list(cfg.get("benchmark_num_ctx"))
+        th = as_list(cfg.get("benchmark_think"))
+        n_combo = n_models * max(len(variants), 1) * len(mt) * len(nc) * len(th)
+        n_calls = n_img * runs * n_combo
+        print(f"\n  >> {n_img} img × {runs} runs × {n_combo} combos "
+              f"({n_models} mod × {len(variants)} prompt × {len(mt)} maxtok × {len(nc)} ctx "
+              f"× {len(th)} think) = {n_calls} llamadas")
+        print(f"     maxtok={mt} | num_ctx={nc} | think={['ON' if x else 'OFF' for x in th]} "
+              f"| prompts={', '.join(variants)}")
         print(BENCH_MENU)
         choice = ask("Opción: ")
         if choice == "1":
@@ -339,10 +415,11 @@ def benchmark_menu(cfg):
             bench_pick_variants(cfg)
             save_config(cfg)
         elif choice == "6":
-            set_ctx(cfg, mt_key="benchmark_max_tokens", nc_key="benchmark_num_ctx")
+            bench_set_ctx(cfg)
             save_config(cfg)
         elif choice == "7":
-            toggle_think(cfg, key="benchmark_think"); save_config(cfg)
+            bench_pick_think(cfg)
+            save_config(cfg)
         elif choice == "8":
             save_config(cfg)
             bench_run(cfg)

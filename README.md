@@ -43,9 +43,10 @@ El menú tiene dos formas de analizar:
 1. **Smoke test** (opción 1): una imagen, imprime el razonamiento en vivo + JSON.
 2. **Benchmark** (opción 2): abre un **submenú** donde elegís **qué imágenes**
    (cuáles y cuántas), **qué modelos**, **qué prompts** (una o varias variantes),
-   cuántas **runs** y el **contexto** (`num_ctx` / `max_tokens`). Corre el producto
-   **modelos × prompts** con **barra de progreso** y al final reporta **tiempos**
-   (por imagen, total, promedio, P50/P95), la **tasa de JSON válido** y un veredicto
+   cuántas **runs**, y **uno o varios** valores de `max_tokens`, `num_ctx` y `think`.
+   Corre el **producto cartesiano** de todas esas dimensiones con **barra de
+   progreso** y al final reporta **tiempos** (por imagen, total, promedio,
+   P50/P95), la **tasa de JSON válido** y un veredicto
    con la mejor combinación. Comparar varias prompts acá reemplaza al viejo
    `prompt_test`: las prompts se prueban igual que los modelos, todo junto.
 
@@ -83,40 +84,51 @@ final el JSON, la latencia y los tokens de entrada/salida.
 | `--variant`     | `variant`             | Variante de prompt (`v1_original`, `v2_antiloop`, …). Ver "Variantes de prompt". |
 | `--max-tokens`  | `max_tokens`          | Tope de tokens de **salida** (`num_predict`; incluye el razonamiento). |
 | `--num-ctx`     | `num_ctx`             | Ventana de contexto (entrada+salida); la que muestra `ollama ps`. |
-| `--think` / `--no-think` | `think`      | Razonamiento (default ON; en qwen3-vl `--no-think` no lo apaga del todo). |
+| `--think` / `--no-think` | `think`      | Pide razonar/no. **Solo aplica a modelos con capability `thinking`** y solo se manda si el modelo la tiene. En `qwen3-vl` (0.30.6) `--no-think` se ignora (razona igual); para no razonar, usá `qwen2.5vl:7b`. |
 | `--url`         | `url`                 | Host de Ollama. |
 
 ### Benchmark — conjunto de imágenes (tiempos + P50/P95 + % JSON válido)
 
+El benchmark **barre el producto cartesiano de TODAS estas dimensiones** —
+modelos, prompts, imágenes, `max_tokens`, `num_ctx` y `think` — y cada
+combinación es una fila del reporte. Todas aceptan **varios valores**:
+
 ```bash
 python3 src/benchmark.py                                    # usa todo lo de config.json (claves benchmark_*)
 python3 src/benchmark.py fotos/clean --runs 5
-python3 src/benchmark.py fotos/clean --models qwen3-vl:4b qwen3-vl:8b
-python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop   # A/B de prompts
-python3 src/benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg      # solo esas imágenes
+python3 src/benchmark.py fotos/clean --models qwen3-vl:4b qwen3-vl:8b      # varios modelos
+python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop    # A/B de prompts
+python3 src/benchmark.py fotos/clean --max-tokens 4096 8192                # comparar topes de salida
+python3 src/benchmark.py fotos/clean --num-ctx 8192 16384                  # comparar ventanas de contexto
+python3 src/benchmark.py fotos/clean --think true false                    # comparar con/sin razonar
+python3 src/benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg       # solo esas imágenes
 python3 src/benchmark.py fotos/clean --scope todo --runs 1
 ```
+
+> Cuidado con la **explosión combinatoria**: el total de llamadas es
+> `imágenes × runs × modelos × prompts × max_tokens × num_ctx × think`. El menú te
+> muestra el total antes de correr.
 
 | Flag            | Default (config.json)  | Qué hace |
 |-----------------|------------------------|----------|
 | `folder` (posic.)| `folder`              | Carpeta con imágenes (jpg/jpeg/png/bmp/webp). |
 | `--images`      | (todas)                | Nombres concretos dentro de la carpeta (ej. `1.jpeg 14.jpeg`). Sin esto, usa todas. |
-| `--models`      | `benchmark_models`     | Lista de modelos a comparar (separados por espacio). |
-| `--variants`    | `benchmark_variants`   | Lista de variantes de prompt a comparar (`v1_original v2_antiloop …`). |
+| `--models`      | `benchmark_models`     | Uno o varios modelos a comparar (separados por espacio). |
+| `--variants`    | `benchmark_variants`   | Una o varias variantes de prompt (`v1_original v2_antiloop …`). |
 | `--runs`        | `benchmark_runs`       | Repeticiones por imagen. |
 | `--scope`       | `benchmark_scope`      | `industrial` o `todo`. |
-| `--max-tokens`  | `benchmark_max_tokens` | Tope de tokens de salida (`num_predict`). |
-| `--num-ctx`     | `benchmark_num_ctx`    | Ventana de contexto (la que muestra `ollama ps`). |
-| `--think` / `--no-think` | `benchmark_think` | Razonamiento del modelo (default ON). |
+| `--max-tokens`  | `benchmark_max_tokens` | Uno o **varios** topes de salida (`num_predict`) a comparar (ej. `4096 8192`). |
+| `--num-ctx`     | `benchmark_num_ctx`    | Una o **varias** ventanas de contexto a comparar (ej. `8192 16384`). |
+| `--think`       | `benchmark_think`      | Uno o **varios** valores `true`/`false` a comparar (ej. `--think true false`). Solo cambia algo en modelos con capability `thinking`; ver nota de razonamiento. |
 | `--url`         | `url`                  | Host de Ollama. |
 
-El benchmark barre el producto **modelos × prompts**: pasale varios modelos
-**y/o** varias variantes y compara todas las combinaciones en una sola corrida.
-Mientras corre muestra una **barra de progreso** (modelo/prompt/imagen actual, %
-y ETA). Al terminar imprime el **tiempo por imagen** (prom/min/max), una tabla por
-combinación (P50/P95/media/min/max/total + JSON% + cortes por `length` + objetos
-promedio) y un **veredicto** con la mejor combinación; guarda todo en
-`results/benchmark_resultados.json`.
+Mientras corre muestra una **barra de progreso** (combinación/imagen actual, %
+y ETA). Al terminar imprime el **tiempo por imagen** (prom/min/max) y una tabla con
+**una fila por combinación** y columnas `ctx`/`maxtok`/`thk` además de
+P50/P95/media/min/max/total + JSON% + cortes por `length` + objetos promedio; cierra
+con un **veredicto** que te da la **config completa** de la mejor combinación
+(model + variant + max_tokens + num_ctx + think), listo para pegar en `config.json`.
+Guarda todo en `results/benchmark_resultados.json`.
 
 > **Nota de contexto (velocidad):** el benchmark arranca con `num_ctx=8192` /
 > `max_tokens=4096` — la **mitad** de lo que usa el smoke test (16384 / 8192).
@@ -198,11 +210,17 @@ Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
   "benchmark_images": [],
   "benchmark_scope": "industrial",
   "benchmark_variants": ["v2_antiloop"],
-  "benchmark_max_tokens": 4096,
-  "benchmark_num_ctx": 8192,
-  "benchmark_think": true
+  "benchmark_max_tokens": [4096],
+  "benchmark_num_ctx": [8192],
+  "benchmark_think": [true]
 }
 ```
+
+Las dimensiones de barrido del benchmark (`benchmark_models`, `benchmark_variants`,
+`benchmark_max_tokens`, `benchmark_num_ctx`, `benchmark_think`) son **listas**:
+poné un solo elemento para no barrer esa dimensión, o varios para compararlos
+(ej. `"benchmark_max_tokens": [4096, 8192]`). El benchmark también acepta valores
+escalares de configs viejas (los envuelve en lista solo).
 
 Las claves `benchmark_*` son la config **propia del benchmark** (independiente
 del smoke test). `benchmark_images: []` significa **todas** las imágenes de la
@@ -216,14 +234,30 @@ carpeta (si agregás fotos, entran solas); poné una lista de nombres
   (~10 GB cargado) **no entra** y Ollama lo parte ~53% CPU / 47% GPU →
   ~85–110 s por imagen. `qwen3-vl:4b` (~3.3 GB) carga **100% en GPU** →
   ~15–25 s. Por eso el default es `4b`. Confirmá con `ollama ps`.
-- **Razonamiento (thinking):** `qwen3-vl` razona por defecto. En Ollama 0.30.6,
-  mandar `"think": false` **no lo apaga de verdad**, solo lo acorta. El problema
-  real no es el flag sino quedarse sin tokens: si el razonamiento se come todo el
-  presupuesto, `content` vuelve vacío (`finish_reason: length`). La solución es
-  doble: **(1)** un prompt que lo frene (ver abajo) y **(2)** darle aire con
-  `max_tokens` (salida) y `num_ctx` (ventana total). Usamos el endpoint **nativo**
-  de Ollama (`/api/chat`, no el `/v1/...`) porque separa el razonamiento
-  (`thinking`) del JSON (`content`) y permite **imprimirlo en vivo**.
+- **Razonamiento (thinking) — el flag NO es un on/off, lo decide el MODELO:**
+  probado contra Ollama 0.30.6, el control de razonamiento **no** es un simple
+  `think: true/false` por request, sino que depende de la *capability* del modelo
+  (la podés ver con `ollama show <modelo>` o `/api/show`):
+
+  | modelo | capability `thinking` | `--think` (ON) | `--no-think` (OFF) |
+  |--------|:---------------------:|----------------|--------------------|
+  | `qwen3-vl:4b` / `:8b` | sí | razona | **razona igual** (el renderer `qwen3-vl-thinking` **ignora** `think:false` en 0.30.6) |
+  | `qwen2.5vl:7b` | no | **error HTTP 400** si se manda el flag | nunca razona (OFF real) |
+
+  O sea: **el verdadero interruptor de razonamiento es elegir el modelo**.
+  `qwen3-vl` siempre piensa; si querés que **no** piense, usá un modelo sin la
+  capability `thinking` (ej. `qwen2.5vl:7b`). Por eso el código consulta
+  `/api/show` y **sólo manda `think` si el modelo lo soporta** (a `qwen2.5vl` no se
+  lo manda: si no, devuelve `400 "does not support thinking"` — antes eso hacía
+  fallar el benchmark de ese modelo). La UI te dice la verdad por modelo (si
+  razona, si se pidió y si efectivamente razonó). Si necesitás apagar el
+  razonamiento de `qwen3-vl`, hace falta otra versión de Ollama (en 0.30.6 no se
+  puede). Y ojo: cuando razona, el riesgo es quedarse sin tokens — si el
+  razonamiento se come el presupuesto, `content` vuelve vacío
+  (`finish_reason: length`); se mitiga con el prompt anti-loop (abajo) y dándole
+  aire con `max_tokens` y `num_ctx`. Usamos el endpoint **nativo** (`/api/chat`,
+  no `/v1/...`) porque separa el razonamiento (`thinking`) del JSON (`content`) y
+  permite **imprimirlo en vivo**.
 - **Prompt anti-loop (por qué se quedaba sin contexto):** el caso típico era una
   imagen donde el modelo *reconocía* el objeto (p. ej. un bushing / transformador)
   pero entraba en bucle **debatiendo en qué familia ponerlo** (`electrica`? `otro`?

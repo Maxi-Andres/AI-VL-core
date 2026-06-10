@@ -72,6 +72,49 @@ def host_of(url):
 
 
 # --------------------------------------------------------------------------- #
+# Capacidades del modelo (¿razona o no?)
+# --------------------------------------------------------------------------- #
+# OJO con el flag `think`: probado contra Ollama 0.30.6 con qwen3-vl y qwen2.5vl,
+# el control de razonamiento NO es un simple on/off por request, sino que depende
+# del MODELO:
+#   - qwen3-vl:4b / :8b  -> capability "thinking" (renderer "qwen3-vl-thinking").
+#                           SIEMPRE razona; mandar "think": false NO lo apaga en
+#                           esta versión (el renderer lo ignora).
+#   - qwen2.5vl:7b       -> SIN capability "thinking". Nunca razona, y mandarle
+#                           "think": true devuelve HTTP 400 ("does not support
+#                           thinking"). Por eso hay que NO mandar el flag si el
+#                           modelo no lo soporta (si no, el benchmark da 100% error).
+# O sea: el verdadero interruptor de razonamiento es ELEGIR EL MODELO. Acá
+# detectamos la capability vía /api/show para (a) no romper modelos sin thinking
+# y (b) decirle la verdad al usuario en la UI.
+_CAPS_CACHE = {}
+
+
+def model_capabilities(model, url=OLLAMA_HOST):
+    """Devuelve el set de capabilities del modelo (vía /api/show). Cachea por (host, model).
+
+    Si no se puede consultar (server caído, modelo inexistente), devuelve set vacío.
+    """
+    key = (host_of(url), model)
+    if key in _CAPS_CACHE:
+        return _CAPS_CACHE[key]
+    caps = set()
+    try:
+        r = requests.post(host_of(url) + "/api/show", json={"model": model}, timeout=10)
+        r.raise_for_status()
+        caps = set(r.json().get("capabilities") or [])
+    except (requests.RequestException, ValueError):
+        caps = set()
+    _CAPS_CACHE[key] = caps
+    return caps
+
+
+def model_supports_thinking(model, url=OLLAMA_HOST):
+    """True si el modelo declara la capability 'thinking' (puede razonar)."""
+    return "thinking" in model_capabilities(model, url)
+
+
+# --------------------------------------------------------------------------- #
 # MODOS DE DETECCIÓN (scope) + VARIANTES DE PROMPT (intercambiables / A-B test)
 # --------------------------------------------------------------------------- #
 # Hay dos scopes:
@@ -248,14 +291,17 @@ DEFAULT_CONFIG = {
     # El benchmark barre el producto MODELOS × VARIANTES: igual que comparás
     # varios modelos, ahora comparás varias variantes de prompt en la misma
     # corrida (esto reemplaza al viejo 05_prompt_test.py).
+    #
+    # max_tokens/num_ctx/think son LISTAS: el benchmark compara TODOS sus valores
+    # (igual que modelos/prompts/fotos). Poné un solo valor para no barrerlos.
     "benchmark_models": ["qwen3-vl:8b", "qwen3-vl:4b", "qwen2.5vl:7b"],
     "benchmark_runs": 3,               # repeticiones por imagen
     "benchmark_images": [],            # imágenes elegidas a mano ([] = TODAS las de la carpeta)
     "benchmark_scope": "industrial",   # modo de detección del benchmark
-    "benchmark_variants": ["v2_antiloop"],  # variantes de prompt a comparar (lista; ver PROMPT_VARIANTS)
-    "benchmark_max_tokens": 4096,      # tope de SALIDA del benchmark (la mitad del smoke: más rápido)
-    "benchmark_num_ctx": 8192,         # ventana de contexto del benchmark (la mitad: prefill más rápido)
-    "benchmark_think": True,           # razonamiento durante el benchmark
+    "benchmark_variants": ["v2_antiloop"],  # variantes de prompt a comparar (ver PROMPT_VARIANTS)
+    "benchmark_max_tokens": [4096],    # topes de SALIDA a comparar (lista)
+    "benchmark_num_ctx": [8192],       # ventanas de contexto a comparar (lista)
+    "benchmark_think": [True],         # valores de razonamiento a comparar (lista de bools)
 }
 
 
@@ -383,9 +429,14 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
       - max_tokens (num_predict) = tope de tokens de SALIDA (incluye el thinking).
 
     `size` (ancho, alto) se usa para normalizar los bbox a 0..1.
+
+    El flag `think` SÓLO se manda si el modelo soporta razonamiento (capability
+    'thinking'); a un modelo que no la tiene (p. ej. qwen2.5vl) mandarle el flag
+    devuelve HTTP 400, así que lo omitimos. Ver model_supports_thinking().
     Levanta requests.RequestException si falla la red/el server.
     """
     sp = get_prompt(scope, variant)
+    supports_think = model_supports_thinking(model, url)
     payload = {
         "model": model,
         "messages": [
@@ -393,7 +444,6 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
             {"role": "user", "content": sp["user"], "images": [img_b64]},
         ],
         "stream": True,
-        "think": think,
         "format": "json",  # fuerza JSON válido en content
         "options": {
             "temperature": 0.1,
@@ -401,6 +451,9 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
             "num_ctx": num_ctx,
         },
     }
+    # Sólo incluimos `think` si el modelo lo soporta (si no, Ollama devuelve 400).
+    if supports_think:
+        payload["think"] = think
     chat_url = host_of(url) + "/api/chat"
 
     think_buf, content_buf = [], []
@@ -451,6 +504,9 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
         "ok": ok,
         "in_tokens": in_tok,
         "out_tokens": out_tok,
+        "think_requested": think,          # lo que pidió el usuario
+        "thinking_supported": supports_think,  # si el modelo puede razonar
+        "did_think": bool(reasoning),      # si efectivamente razonó
     }
 
 
@@ -500,6 +556,28 @@ def progress_bar(done, total, suffix="", width=24):
         print()
 
 
+def describe_thinking(res):
+    """Resume EN UNA LÍNEA la verdad sobre el razonamiento de esta corrida.
+
+    El flag `think` no es un on/off confiable (depende del modelo y la versión de
+    Ollama), así que en vez de mostrar lo que se PIDIÓ mostramos lo que PASÓ:
+    si el modelo puede razonar, si se le pidió, y si efectivamente razonó.
+    """
+    requested = res.get("think_requested")
+    supported = res.get("thinking_supported")
+    did = res.get("did_think")
+    if not supported:
+        return "este modelo NO razona (sin capability 'thinking') — OFF real, no aplica el flag"
+    if did and not requested:
+        return ("pediste OFF pero razonó igual — este modelo/versión de Ollama "
+                "ignora think=false (para no razonar, usá un modelo sin 'thinking')")
+    if did and requested:
+        return "ON (razonó)"
+    if not did and requested:
+        return "ON pedido, pero no razonó en esta corrida"
+    return "OFF (no razonó)"
+
+
 def render_result(model, res):
     """Imprime el resultado de un query_vlm de forma legible (smoke test / menú)."""
     print("\n========== RESULTADO ==========")
@@ -509,6 +587,7 @@ def render_result(model, res):
     if res.get("in_tokens") is not None:
         print(f"Tokens:        entrada={res['in_tokens']}  "
               f"salida={res['out_tokens']}  (razonamiento≈{len(res['reasoning'])} chars)")
+    print(f"Razonamiento:  {describe_thinking(res)}")
     print(f"JSON válido:   {'SÍ' if res['ok'] else 'NO'}")
     print("-------------------------------")
     if res["ok"]:

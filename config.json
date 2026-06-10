@@ -1,11 +1,11 @@
 {
   "model": "qwen3-vl:4b",
-  "image": "fotos/clean/19.jpeg",
+  "image": "fotos/clean/9.jpeg",
   "folder": "fotos/clean",
   "scope": "industrial",
   "variant": "v2_antiloop",
-  "max_tokens": 8192,
-  "num_ctx": 16384,
+  "max_tokens": 4096,
+  "num_ctx": 8192,
   "think": true,
   "url": "http://localhost:11434",
   "benchmark_models": [
@@ -23,7 +23,13 @@
     "v1_original",
     "v2_antiloop"
   ],
-  "benchmark_max_tokens": 4096,
-  "benchmark_num_ctx": 8192,
-  "benchmark_think": true
+  "benchmark_max_tokens": [
+    4096
+  ],
+  "benchmark_num_ctx": [
+    8192
+  ],
+  "benchmark_think": [
+    true
+  ]
 }
