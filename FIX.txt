@@ -1,54 +1,28 @@
-hacer que funcione mejor, intenta sacar el think por que lo sigue haciendo, o que minimo me imprima lo que va pensando
-fijate que onda los max_tokens en que influyen, si pongo ollama ps tienen un context, no se si eso influye
+- intentar evitar que el modelo piense, quiza fijate otra version o en hugging face, el │ qwen3-vl:4b │ piensa siempre aunque lo saques
+- proba con ollama en consola de una si te permite sacar el think NO, piensa igual siempre se necesita el modelo no think
 
-me parece que hay que mejorar la propmt inicial, por que pone el think:
-[!] No devolvió JSON parseable.
-[!] content vino VACÍO.
-    -> Cortado por longitud. Subí max_tokens.
-    -> El modelo gastó tokens en razonamiento. Desactivá 'think' o subí max_tokens.
-    reasoning_content (primeros 500 chars):
-Got it, let's analyze the image. The main object here is a flow meter, which is an industrial instrument. Let's check the categories. The user specified manometro, termometro, valvula, sensor, epp, otro.
+- !FIJATE de mas adelante cuando este el robot y tenga que pensar mas si quiza combiene alternar entre ambos modelos, el instruct y el thinking dependiendo la tarea, ademas de usar yolo 
 
-First, identify each part. The device has a digital display with "CONTATEC" on it. It's mounted on a metallic body with arrows indicating flow direction. This is likely a flow meter, which falls under 
-cuando subi los tokens esto dejo de pasar, quiza si el propt tendra todo podria pensar mas rapido por que es como que duda en que categoria ponerlo pero yo no tengo una lista osea tiene que poder identificar que es
-pongo un ejemplo de ocsas que deberia detectar pero devuelta tiene que ser capaz de detectar cualquier instrumento asi de industria tipo oil and gas
-Medición de presión
+- !FIJATE de probar de meter un VLA en el medio o directamente sacar el VLM investiga eso (igual en esta compu los dos no pueden correr)
 
-Manómetro
-Transmisor de presión
-Presostato
-Vacuómetro
+- creo que hay un cuello de botella, cuando analizas una foto como que tarda mas, pero despues si haces la segunda tarda menos
+como que tarda el primer intento por que le cargas el modelo a la GPU? se podra implementar algo para que este siempre cargado? 
+o que pueda definir si pre-cargarlo para despues usarlo por que necesito los menores tiempos posibles, por que necesito velocidad cuando este implementado el robot
+ademas me di cuenta que cuando hago 2 veces la misma imagen la segunda vez tambien es mas rapido
+el tiempo desde que toco enter hasta que veo como imprime lo que piensa y tambien lo que piensa en total es menos cuando repito la imagen
 
-Medición de temperatura
+- dale accesso a claude para que pruebe con distintos prompts, max_tokens, etc, para intentar reducir el tiempo al maximo 
 
+DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre ellos si no no se puede comparar, y que en estos ademas de lo que se guarda tambien se guarden los jsons de cada imagen que detectan para poder ver que pusieron, verificar tambien que la ia no lea los nombres de las imagenes, eso es trampa
 
+- hace un front real para no usar mas la consola fijate si podes hacer que python sea el back end
 
-quiza que el prompt en ingles??? es mas eficiente asi?
+- !FIJATE de provar que onda YOLOv8 o v11 quiza son mas rapidos o podes usar eso para hacer rapido y despues los vl para el movimiento de el robot y las respuestas a comandos de voz
 
-hacer un front end real mas comodo despues
-probar con mas fotos y poner las fotos bien con los nombres
-que si yo agrego mas fotos automaticamente me de mas opciones y las detecte 
+- que este la mejor config y la actual, y una manera de pasar la actual a la mejor, luego de pruebas y tocar cosas, y tambien una manera de guardar la mejor si hay una mejor
 
 
-provar que onda YOLOv8 o v11 quiza son mas rapidos, 
-
-
-con la imagen 16 se quedo sin context
-
-
-en ingles y que lo ponga el prompt como estaba que era mas rapido, ademas, quiero que este prompt nuevo tambien lo ponga y que se puedan intercambiar, ademas que haga un archivo de test
-que lo que pruebe son unas imagenes y el modelo con distintos prompts para ver con cual responde mas rapido
-
-
-
-poner un test bueno de verdad que te deje elegir cuantas imagenes, cuales, los modelos, las runs, etc, y que te de una barra que te muestre el progreso asi sabes
-ademas que te ponga los tiempos y todo, tiempo entre imagenes, tiepo en total, etc y fijate el tema de el contexto de quiza bajarlo a como estaba para que no tarde tanto?
-pero si tiene poco contexto no puede y falla ver diferencia netre max-tokens y num_ctx
-
-
-
-
-
+------------------------------------------------------------------------------------------------------------------------------------------------
 
 Diferencia entre max_tokens y num_ctx
 
@@ -56,12 +30,8 @@ Diferencia entre max_tokens y num_ctx
 - max_tokens (= num_predict) = el tope de lo que el modelo genera (razonamiento + respuesta). Si lo alcanza, corta → finish_reason: length y el content puede venir vacío.
 - Cómo se combinan: la salida real disponible es min(max_tokens, num_ctx − tokens_de_entrada). Los dos tienen que alcanzar: si max_tokens es chico corta aunque sobre num_ctx; si num_ctx es chico, la imagen le come lugar a la respuesta y también se traba. Por eso "poco contexto se traba, mucho contexto va lento" — hay que encontrar el punto medio (8192 / 4096 funcionó bien acá).
 
+------------------------------------------------------------------------------------------------------------------------------------------------
 
+⚠️ Lo que hay que confirmar al revisar
 
-que este la mejor config y la actual, y una manera de pasar la actual a la mejor, luego de pruebas y tocar cosas, y tambien una manera de guardar la mejor si hay una mejor
-
-pasar todo a ingles
-
-intentar que no piense
-
-que te bajes el repo instales dependencias y funcione
+Las claves del JSON ahora son inglés (objects/type/…). Eso es el contrato VLM→VLA que consume el "Silk AI Proxy Gateway / F1.9": el consumidor downstream tiene que actualizarse para leer las claves nuevas, si no, se rompe. Lo dejé anotado en CLAUDE.md también. Como vos revisás antes de usar/commitear, lo verificás ahí.

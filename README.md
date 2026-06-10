@@ -1,185 +1,236 @@
-# VLM PoC — Inspección industrial con Ollama
+# VLM PoC — Industrial inspection with Ollama
 
-Detección de instrumentos/objetos en imágenes usando un VLM (qwen3-vl) servido
-por Ollama, devolviendo JSON con bounding boxes. Pensado para validar el VLM
-primario del PoC (criterios F1.8) y el contrato VLM→VLA.
+Detection of instruments/objects in images using a VLM (qwen3-vl) served
+by Ollama, returning JSON with bounding boxes. Designed to validate the primary
+VLM of the PoC (F1.8 criteria) and the VLM→VLA contract.
 
-## Estructura del proyecto
+## Project structure
 
 ```
 .
-├── menu.py            # entrada principal (menú interactivo)
-├── src/               # código fuente
-│   ├── vlm_common.py  # núcleo: prompts, cliente Ollama, parseo, config
-│   ├── smoke_test.py  # smoke test de 1 imagen (CLI)
-│   └── benchmark.py   # benchmark de latencia/JSON + A/B de prompts (CLI)
-├── fotos/             # carpetas de imágenes
-│   ├── clean/         # set de prueba del lab
-│   └── ciudad/        # set adicional
-├── results/           # salida de los benchmarks (JSON)
-├── config.json        # configuración persistente (se crea sola)
+├── menu.py            # main entry point (interactive menu)
+├── src/               # source code
+│   ├── vlm_common.py  # core: prompts, Ollama client, parsing, config
+│   ├── smoke_test.py  # 1-image smoke test (CLI)
+│   └── benchmark.py   # latency/JSON benchmark + prompt A/B (CLI)
+├── fotos/             # image folders
+│   ├── clean/         # lab test set
+│   └── ciudad/        # additional set
+├── results/           # benchmark output (JSON)
+├── config.json        # persistent configuration (created on its own)
 └── requirements.txt
 ```
 
-## Requisitos
+## Requirements
 
 ```bash
-pip install -r requirements.txt    # (solo requests)
+pip install -r requirements.txt    # (only requests)
 ```
 
-- **Ollama** corriendo en `http://localhost:11434` con los modelos descargados
+- **Ollama** running at `http://localhost:11434` with the models downloaded
   (`ollama pull qwen3-vl:4b`, etc.).
-- Verificá que esté vivo: `curl http://localhost:11434/api/version`
-- Verificá que el modelo cargue **100% en GPU**: `ollama ps` (ver nota de VRAM abajo).
+- Verify it's alive: `curl http://localhost:11434/api/version`
+- Verify the model loads **100% on GPU**: `ollama ps` (see the VRAM note below).
 
-## Uso rápido: el menú (sin escribir comandos)
+## Models (Ollama)
+
+Qwen3-VL comes in **two separate checkpoints** (it's not a flag): **Thinking**
+(always reasons) and **Instruct** (doesn't reason). Ollama's `qwen3-vl:4b` **is the
+Thinking one** (same blob as `qwen3-vl:4b-thinking`). To turn reasoning on/off you
+**switch models**, not the flag (see "Reasoning" below).
+
+**4B** variants in the Ollama registry (all Text+Image, 256K context):
+
+| tag | size | quantization | on an 8 GB GPU |
+|-----|-------:|--------------|----------------|
+| **`qwen3-vl:4b-instruct`**  (= `-instruct-q4_K_M`) | 3.3 GB | Q4_K_M | ✅ 100% GPU — **recommended** |
+| `qwen3-vl:4b-instruct-q8_0` | 5.1 GB | Q8_0  | ⚠ barely fits; check `ollama ps` |
+| `qwen3-vl:4b-instruct-bf16` | 8.9 GB | BF16  | ❌ doesn't fit (splits CPU/GPU) |
+| `qwen3-vl:4b-thinking`  (= `qwen3-vl:4b`, `-thinking-q4_K_M`) | 3.3 GB | Q4_K_M | ✅ 100% GPU |
+| `qwen3-vl:4b-thinking-q8_0` | 5.1 GB | Q8_0  | ⚠ barely fits |
+| `qwen3-vl:4b-thinking-bf16` | 8.9 GB | BF16  | ❌ doesn't fit |
+
+Others that exist / are installed: `qwen3-vl:8b`, `qwen3-vl:8b-instruct`,
+`qwen2.5vl:7b` (the latter **without** the `thinking` capability: it never reasons, but it's
+another generation).
+
+**Recommended for the PoC: `qwen3-vl:4b-instruct`** — it doesn't reason (faster, no
+token-starvation) and fits 100% on GPU. Download it with:
 
 ```bash
-python3 menu.py        # o simplemente darle Play al archivo en el IDE
+ollama pull qwen3-vl:4b-instruct
 ```
 
-El menú tiene dos formas de analizar:
+To compare thinking vs not-thinking within the same family, run the benchmark with
+both: `python3 src/benchmark.py fotos/clean --models qwen3-vl:4b-instruct qwen3-vl:4b-thinking`.
 
-1. **Smoke test** (opción 1): una imagen, imprime el razonamiento en vivo + JSON.
-2. **Benchmark** (opción 2): abre un **submenú** donde elegís **qué imágenes**
-   (cuáles y cuántas), **qué modelos**, **qué prompts** (una o varias variantes),
-   cuántas **runs** y el **contexto** (`num_ctx` / `max_tokens`). Corre el producto
-   **modelos × prompts** con **barra de progreso** y al final reporta **tiempos**
-   (por imagen, total, promedio, P50/P95), la **tasa de JSON válido** y un veredicto
-   con la mejor combinación. Comparar varias prompts acá reemplaza al viejo
-   `prompt_test`: las prompts se prueban igual que los modelos, todo junto.
+## Quick start: the menu (without typing commands)
 
-**Todo lo que elegís se guarda en `config.json`**, así la próxima vez arranca
-con lo último que usaste. El benchmark tiene su **propia** config (claves
-`benchmark_*`), independiente del smoke test: podés correr el benchmark con un
-contexto más liviano (más rápido) sin bajarle el contexto al smoke test.
+```bash
+python3 menu.py        # or just hit Play on the file in the IDE
+```
+
+The menu has two ways to analyze:
+
+1. **Smoke test** (option 1): one image, prints the reasoning live + JSON.
+2. **Benchmark** (option 2): opens a **submenu** where you choose **which images**
+   (which ones and how many), **which models**, **which prompts** (one or several variants),
+   how many **runs**, and **one or several** values of `max_tokens`, `num_ctx` and `think`.
+   It runs the **Cartesian product** of all those dimensions with a **progress
+   bar** and at the end reports **times** (per image, total, average,
+   P50/P95), the **valid-JSON rate** and a verdict
+   with the best combination. Comparing several prompts here replaces the old
+   `prompt_test`: prompts are tested just like models, all together.
+
+**Everything you choose is saved to `config.json`**, so next time it starts
+with whatever you last used. The benchmark has its **own** config (the
+`benchmark_*` keys), independent of the smoke test: you can run the benchmark with a
+lighter context (faster) without lowering the smoke test's context.
 
 ---
 
-## Uso sin menú (línea de comandos)
+## Use without the menu (command line)
 
-Los dos scripts toman sus **defaults de `config.json`**; cualquier flag pisa ese
-default solo para esa corrida (no modifica el archivo).
+Both scripts take their **defaults from `config.json`**; any flag overrides that
+default only for that run (it doesn't modify the file).
 
-### Smoke test — una imagen
+### Smoke test — one image
 
 ```bash
-python3 src/smoke_test.py                          # usa todo lo de config.json
-python3 src/smoke_test.py fotos/clean/5.jpeg        # otra imagen
+python3 src/smoke_test.py                          # uses everything from config.json
+python3 src/smoke_test.py fotos/clean/5.jpeg        # another image
 python3 src/smoke_test.py fotos/clean/5.jpeg --model qwen3-vl:8b
-python3 src/smoke_test.py fotos/clean/5.jpeg --scope todo
+python3 src/smoke_test.py fotos/clean/5.jpeg --scope all
 python3 src/smoke_test.py fotos/clean/5.jpeg --max-tokens 8192 --num-ctx 16384
-python3 src/smoke_test.py fotos/clean/5.jpeg --no-think     # pedir think=false
+python3 src/smoke_test.py fotos/clean/5.jpeg --no-think     # request think=false
 ```
 
-El smoke test **imprime en vivo lo que el modelo va pensando** (en gris) y al
-final el JSON, la latencia y los tokens de entrada/salida.
+The smoke test **prints live what the model is thinking** (in gray) and at the
+end the JSON, the latency and the input/output tokens.
 
-| Flag            | Default (config.json) | Qué hace |
+| Flag            | Default (config.json) | What it does |
 |-----------------|-----------------------|----------|
-| `image` (posic.)| `image`               | Ruta a la imagen. Si la omitís, usa la de config. |
-| `--model`       | `model`               | Modelo de Ollama (ej. `qwen3-vl:4b`, `qwen3-vl:8b`, `qwen2.5vl:7b`). |
-| `--scope`       | `scope`               | `industrial` (instrumentos industriales) o `todo` (cualquier objeto). |
-| `--variant`     | `variant`             | Variante de prompt (`v1_original`, `v2_antiloop`, …). Ver "Variantes de prompt". |
-| `--max-tokens`  | `max_tokens`          | Tope de tokens de **salida** (`num_predict`; incluye el razonamiento). |
-| `--num-ctx`     | `num_ctx`             | Ventana de contexto (entrada+salida); la que muestra `ollama ps`. |
-| `--think` / `--no-think` | `think`      | Razonamiento (default ON; en qwen3-vl `--no-think` no lo apaga del todo). |
-| `--url`         | `url`                 | Host de Ollama. |
+| `image` (pos.)  | `image`               | Path to the image. If you omit it, it uses the one from config. |
+| `--model`       | `model`               | Ollama model (e.g. `qwen3-vl:4b`, `qwen3-vl:8b`, `qwen2.5vl:7b`). |
+| `--scope`       | `scope`               | `industrial` (industrial instruments) or `all` (any object). |
+| `--variant`     | `variant`             | Prompt variant (`v1_original`, `v2_antiloop`, …). See "Prompt variants". |
+| `--max-tokens`  | `max_tokens`          | Cap on **output** tokens (`num_predict`; includes the reasoning). |
+| `--num-ctx`     | `num_ctx`             | Context window (input+output); the one `ollama ps` shows. |
+| `--think` / `--no-think` | `think`      | Request reasoning/no. **Only applies to models with the `thinking` capability** and is only sent if the model has it. On `qwen3-vl` (0.30.6) `--no-think` is ignored (it reasons anyway); to avoid reasoning, use `qwen2.5vl:7b`. |
+| `--url`         | `url`                 | Ollama host. |
 
-### Benchmark — conjunto de imágenes (tiempos + P50/P95 + % JSON válido)
+### Benchmark — set of images (times + P50/P95 + % valid JSON)
+
+The benchmark **sweeps the Cartesian product of ALL these dimensions** —
+models, prompts, images, `max_tokens`, `num_ctx` and `think` — and each
+combination is a row of the report. All of them accept **several values**:
 
 ```bash
-python3 src/benchmark.py                                    # usa todo lo de config.json (claves benchmark_*)
+python3 src/benchmark.py                                    # uses everything from config.json (benchmark_* keys)
 python3 src/benchmark.py fotos/clean --runs 5
-python3 src/benchmark.py fotos/clean --models qwen3-vl:4b qwen3-vl:8b
-python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop   # A/B de prompts
-python3 src/benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg      # solo esas imágenes
-python3 src/benchmark.py fotos/clean --scope todo --runs 1
+python3 src/benchmark.py fotos/clean --models qwen3-vl:4b qwen3-vl:8b      # several models
+python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop    # prompt A/B
+python3 src/benchmark.py fotos/clean --max-tokens 4096 8192                # compare output caps
+python3 src/benchmark.py fotos/clean --num-ctx 8192 16384                  # compare context windows
+python3 src/benchmark.py fotos/clean --think true false                    # compare with/without reasoning
+python3 src/benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg       # only those images
+python3 src/benchmark.py fotos/clean --scope all --runs 1
 ```
 
-| Flag            | Default (config.json)  | Qué hace |
+> Beware the **combinatorial explosion**: the total number of calls is
+> `images × runs × models × prompts × max_tokens × num_ctx × think`. The menu
+> shows you the total before running.
+
+| Flag            | Default (config.json)  | What it does |
 |-----------------|------------------------|----------|
-| `folder` (posic.)| `folder`              | Carpeta con imágenes (jpg/jpeg/png/bmp/webp). |
-| `--images`      | (todas)                | Nombres concretos dentro de la carpeta (ej. `1.jpeg 14.jpeg`). Sin esto, usa todas. |
-| `--models`      | `benchmark_models`     | Lista de modelos a comparar (separados por espacio). |
-| `--variants`    | `benchmark_variants`   | Lista de variantes de prompt a comparar (`v1_original v2_antiloop …`). |
-| `--runs`        | `benchmark_runs`       | Repeticiones por imagen. |
-| `--scope`       | `benchmark_scope`      | `industrial` o `todo`. |
-| `--max-tokens`  | `benchmark_max_tokens` | Tope de tokens de salida (`num_predict`). |
-| `--num-ctx`     | `benchmark_num_ctx`    | Ventana de contexto (la que muestra `ollama ps`). |
-| `--think` / `--no-think` | `benchmark_think` | Razonamiento del modelo (default ON). |
-| `--url`         | `url`                  | Host de Ollama. |
+| `folder` (pos.) | `folder`               | Folder with images (jpg/jpeg/png/bmp/webp). |
+| `--images`      | (all)                  | Specific names inside the folder (e.g. `1.jpeg 14.jpeg`). Without this, it uses all of them. |
+| `--models`      | `benchmark_models`     | One or several models to compare (space-separated). |
+| `--variants`    | `benchmark_variants`   | One or several prompt variants (`v1_original v2_antiloop …`). |
+| `--runs`        | `benchmark_runs`       | Repetitions per image. |
+| `--scope`       | `benchmark_scope`      | `industrial` or `all`. |
+| `--max-tokens`  | `benchmark_max_tokens` | One or **several** output caps (`num_predict`) to compare (e.g. `4096 8192`). |
+| `--num-ctx`     | `benchmark_num_ctx`    | One or **several** context windows to compare (e.g. `8192 16384`). |
+| `--think`       | `benchmark_think`      | One or **several** `true`/`false` values to compare (e.g. `--think true false`). Only changes anything on models with the `thinking` capability; see the reasoning note. |
+| `--out`         | (timestamped)          | Output file. Default `results/benchmark_<timestamp>.json` (each run gets its own file). |
+| `--url`         | `url`                  | Ollama host. |
 
-El benchmark barre el producto **modelos × prompts**: pasale varios modelos
-**y/o** varias variantes y compara todas las combinaciones en una sola corrida.
-Mientras corre muestra una **barra de progreso** (modelo/prompt/imagen actual, %
-y ETA). Al terminar imprime el **tiempo por imagen** (prom/min/max), una tabla por
-combinación (P50/P95/media/min/max/total + JSON% + cortes por `length` + objetos
-promedio) y un **veredicto** con la mejor combinación; guarda todo en
-`results/benchmark_resultados.json`.
+While running it shows a **progress bar** (current combination/image, %
+and ETA). When it finishes it prints the **time per image** (avg/min/max) and a table with
+**one row per combination** and columns `ctx`/`maxtok`/`thk` plus
+P50/P95/mean/min/max/total + JSON% + `length` cutoffs + average objects; it closes
+with a **verdict** that gives you the **full config** of the best combination
+(model + variant + max_tokens + num_ctx + think), ready to paste into `config.json`.
+Each run is saved to its **own timestamped file** — `results/benchmark_<YYYYMMDD_HHMMSS>.json`
+(or pass `--out path.json`) — so separate runs **never overwrite each other** and can be
+compared. The file holds both the metrics **and the per-image detections**: under each
+combination, `detections` maps every image to what the model actually returned per run
+(the full `{"objects": [...]}`), so you can inspect *what* it detected, not just the
+aggregate numbers. The image **file names are never sent to the model** (only the image
+bytes + the fixed prompt), so it can't "cheat" by reading the name.
 
-> **Nota de contexto (velocidad):** el benchmark arranca con `num_ctx=8192` /
-> `max_tokens=4096` — la **mitad** de lo que usa el smoke test (16384 / 8192).
-> Menos contexto = prefill más rápido (la imagen entra a menor resolución). Con
-> el prompt `v2_antiloop` esto **no** trunca: probado en las imágenes 1, 14 y 16
-> (incluida la que antes se quedaba sin contexto) → JSON válido y ~13–17 s.
-> Si una imagen difícil se vacía (`finish_reason: length`), subí `num_ctx` /
-> `max_tokens` desde el submenú (opción 6).
+> **Context note (speed):** the benchmark starts with `num_ctx=8192` /
+> `max_tokens=4096` — **half** of what the smoke test uses (16384 / 8192).
+> Less context = faster prefill (the image goes in at lower resolution). With
+> the `v2_antiloop` prompt this does **not** truncate: tested on images 1, 14 and 16
+> (including the one that previously ran out of context) → valid JSON and ~13–17 s.
+> If a hard image comes back empty (`finish_reason: length`), raise `num_ctx` /
+> `max_tokens` from the submenu (option 6).
 
-> **Comparar prompts (A/B):** el A/B de variantes de prompt **ya no es un script
-> aparte** — está dentro del benchmark. Pasale varias con `--variants` (o elegilas
-> en el submenú, opción 5) y compará velocidad / JSON% / objetos dejando todo lo
-> demás constante. Ej.: `python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop`.
+> **Comparing prompts (A/B):** the A/B of prompt variants **is no longer a separate
+> script** — it's inside the benchmark. Pass several with `--variants` (or pick them
+> in the submenu, option 5) and compare speed / JSON% / objects keeping everything
+> else constant. E.g.: `python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop`.
 
 ---
 
-## Modos de detección (`scope`)
+## Detection modes (`scope`)
 
-| scope        | Qué detecta | Taxonomía (`tipo`) |
+| scope        | What it detects | Taxonomy (`type`) |
 |--------------|-------------|--------------------|
-| `industrial` | **Cualquier** instrumento/equipo industrial | familia general: `presion\|temperatura\|caudal\|nivel\|electrica\|analisis\|control\|vibracion\|valvula\|epp\|otro` (+ `descripcion` libre con el detalle) |
-| `todo`       | Cualquier objeto visible | categoría libre (`persona`, `vehiculo`, …) |
+| `industrial` | **Any** industrial instrument/equipment | general family: `pressure\|temperature\|flow\|level\|electrical\|analysis\|control\|vibration\|valve\|ppe\|other` (+ free `description` with the detail) |
+| `all`        | Any visible object | free category (`person`, `vehicle`, …) |
 
-Los prompts de cada modo están en `src/vlm_common.py` → `SCOPES`. El modo
-`industrial` da una lista de instrumentos típicos por familia (manómetro,
-termopar, caudalímetro, sensor radar, etc.) **como referencia, no como lista
-cerrada**: el modelo debe poder reconocer cualquier instrumento de industria.
+The prompts for each mode are in `src/vlm_common.py` → `SCOPES`. The
+`industrial` mode gives a list of typical instruments per family (pressure gauge,
+thermocouple, flow meter, radar sensor, etc.) **as a reference, not a closed
+list**: the model must be able to recognize any industrial instrument.
 
-Los **bounding boxes** se devuelven normalizados 0–1. qwen3-vl los entrega en
-píxeles del archivo original, así que el código los normaliza solo (leyendo el
-tamaño real de la imagen del header JPEG/PNG).
+The **bounding boxes** are returned normalized 0–1. qwen3-vl delivers them in
+pixels of the original file, so the code normalizes them on its own (reading the
+real image size from the JPEG/PNG header).
 
-## Variantes de prompt (intercambiables / A-B test)
+## Prompt variants (interchangeable / A-B test)
 
-Los prompts viven en `src/vlm_common.py` → `PROMPT_VARIANTS`, **uno por variante**, y
-están escritos en **inglés** (qwen3-vl razona en inglés; menos overhead de
-traducción). Las *keys* del JSON y los valores de `tipo` siguen en español porque
-son el contrato VLM→VLA.
+The prompts live in `src/vlm_common.py` → `PROMPT_VARIANTS`, **one per variant**, and
+are written in **English** (qwen3-vl reasons in English; less translation
+overhead). The JSON *keys* and the `type` values are also in English because
+they are the VLM→VLA contract.
 
-| scope | variante | cómo es |
+| scope | variant | what it's like |
 |-------|----------|---------|
-| `industrial` | `v1_original` | El prompt corto original. Da la lista de familias y dice "no dudes en la categoría". |
-| `industrial` | `v2_antiloop` | Más larga y explícita: aclara que **los equipos cuentan** (no solo instrumentos), amplía `electrica` (transformador, bushing, seccionador…) y arranca con una REGLA anti-deliberación para que **no se trabe eligiendo categoría** (era lo que vaciaba el `content`). |
-| `todo` | `default` | Único prompt para objetos genéricos. |
+| `industrial` | `v1_original` | The original short prompt. Gives the list of families and says "don't deliberate on the category". |
+| `industrial` | `v2_antiloop` | Longer and more explicit: clarifies that **equipment counts** (not only instruments), expands `electrical` (transformer, bushing, disconnector…) and starts with an anti-deliberation RULE so it **doesn't get stuck choosing a category** (that was what emptied the `content`). |
+| `all` | `default` | Single prompt for generic objects. |
 
-**Cómo intercambiarlas** (3 formas, no hace falta tocar código salvo la última):
-1. `config.json` → clave `"variant"` (smoke) o `"benchmark_variants"` (benchmark).
-2. Flag `--variant v2_antiloop` en `src/smoke_test.py`, o `--variants v1_original v2_antiloop` en `src/benchmark.py` (pisa la config para esa corrida).
-3. La variante **activa por defecto** está en `DEFAULT_VARIANT` (`src/vlm_common.py`); cambiala ahí si querés mover el default global.
+**How to swap them** (3 ways, no need to touch code except the last one):
+1. `config.json` → key `"variant"` (smoke) or `"benchmark_variants"` (benchmark).
+2. Flag `--variant v2_antiloop` in `src/smoke_test.py`, or `--variants v1_original v2_antiloop` in `src/benchmark.py` (overrides the config for that run).
+3. The **default active** variant is in `DEFAULT_VARIANT` (`src/vlm_common.py`); change it there if you want to move the global default.
 
-Para **agregar** una variante nueva: sumá una entrada a `PROMPT_VARIANTS["industrial"]`
-y compará con `python3 src/benchmark.py … --variants <vieja> <nueva>`.
+To **add** a new variant: add an entry to `PROMPT_VARIANTS["industrial"]`
+and compare with `python3 src/benchmark.py … --variants <old> <new>`.
 
-> **Nota de medición:** en pruebas sobre las imágenes 1, 14 y 16, `v2_antiloop`
-> resultó **más rápida** que `v1_original` (p. ej. en la 16: ~15 s vs ~97 s),
-> porque cortar la deliberación de categoría ahorra muchos tokens de razonamiento.
-> La variante activa por defecto es `v1_original` (pedido explícito); cambiala a
-> `v2_antiloop` si querés la más rápida. Reproducí con
+> **Measurement note:** in tests on images 1, 14 and 16, `v2_antiloop`
+> turned out **faster** than `v1_original` (e.g. on image 16: ~15 s vs ~97 s),
+> because cutting the category deliberation saves a lot of reasoning tokens.
+> The default active variant is `v1_original` (explicit request); change it to
+> `v2_antiloop` if you want the faster one. Reproduce with
 > `python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop`.
 
 ## config.json
 
-Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
+It's created on its own the first time. The menu edits it, but you can tweak it by hand:
 
 ```json
 {
@@ -198,79 +249,101 @@ Se crea solo la primera vez. Lo edita el menú, pero podés tocarlo a mano:
   "benchmark_images": [],
   "benchmark_scope": "industrial",
   "benchmark_variants": ["v2_antiloop"],
-  "benchmark_max_tokens": 4096,
-  "benchmark_num_ctx": 8192,
-  "benchmark_think": true
+  "benchmark_max_tokens": [4096],
+  "benchmark_num_ctx": [8192],
+  "benchmark_think": [true]
 }
 ```
 
-Las claves `benchmark_*` son la config **propia del benchmark** (independiente
-del smoke test). `benchmark_images: []` significa **todas** las imágenes de la
-carpeta (si agregás fotos, entran solas); poné una lista de nombres
-(`["1.jpeg", "16.jpeg"]`) para correr solo esas. El smoke test (`max_tokens`,
-`num_ctx`, `scope`, `variant`) queda intacto.
+The benchmark's sweep dimensions (`benchmark_models`, `benchmark_variants`,
+`benchmark_max_tokens`, `benchmark_num_ctx`, `benchmark_think`) are **lists**:
+put a single element to not sweep that dimension, or several to compare them
+(e.g. `"benchmark_max_tokens": [4096, 8192]`). The benchmark also accepts scalar
+values from old configs (it wraps them in a list on its own).
 
-## Notas importantes
+The `benchmark_*` keys are the benchmark's **own** config (independent
+of the smoke test). `benchmark_images: []` means **all** the images in the
+folder (if you add photos, they're included automatically); put a list of names
+(`["1.jpeg", "16.jpeg"]`) to run only those. The smoke test (`max_tokens`,
+`num_ctx`, `scope`, `variant`) stays intact.
 
-- **VRAM / elección de modelo:** en una GPU de 8 GB (ej. RTX 5060), `qwen3-vl:8b`
-  (~10 GB cargado) **no entra** y Ollama lo parte ~53% CPU / 47% GPU →
-  ~85–110 s por imagen. `qwen3-vl:4b` (~3.3 GB) carga **100% en GPU** →
-  ~15–25 s. Por eso el default es `4b`. Confirmá con `ollama ps`.
-- **Razonamiento (thinking):** `qwen3-vl` razona por defecto. En Ollama 0.30.6,
-  mandar `"think": false` **no lo apaga de verdad**, solo lo acorta. El problema
-  real no es el flag sino quedarse sin tokens: si el razonamiento se come todo el
-  presupuesto, `content` vuelve vacío (`finish_reason: length`). La solución es
-  doble: **(1)** un prompt que lo frene (ver abajo) y **(2)** darle aire con
-  `max_tokens` (salida) y `num_ctx` (ventana total). Usamos el endpoint **nativo**
-  de Ollama (`/api/chat`, no el `/v1/...`) porque separa el razonamiento
-  (`thinking`) del JSON (`content`) y permite **imprimirlo en vivo**.
-- **Prompt anti-loop (por qué se quedaba sin contexto):** el caso típico era una
-  imagen donde el modelo *reconocía* el objeto (p. ej. un bushing / transformador)
-  pero entraba en bucle **debatiendo en qué familia ponerlo** (`electrica`? `otro`?
-  `control`?) hasta agotar los tokens → `content` vacío. El prompt de `industrial`
-  ahora corta eso de raíz:
-  - el `system` le pide **razonar en pocos pasos, sin repetirse, y pasar al JSON
-    apenas reconoce el objeto** (no re-evaluar la categoría);
-  - el `user` arranca con una **REGLA explícita**: identificar de un vistazo, no
-    debatir, y si duda entre dos familias elegir una y poner el detalle en
-    `descripcion` (o usar `otro`);
-  - se aclara que **los equipos también cuentan** (no solo instrumentos de medición)
-    y se ampliaron las familias (`electrica` ahora incluye transformador, bushing,
-    seccionador, interruptor, barra, celda; se sumaron ejemplos de `valvula` y `epp`).
+## Important notes
 
-  Resultado esperado: razonamiento más corto (más rápido) y sin truncarse. Igual
-  conviene dejar margen de tokens para las imágenes difíciles.
-- **`max_tokens` vs `num_ctx` (la diferencia que importa):**
-  - **`num_ctx`** = la **ventana de contexto completa**: todo lo que entra +
-    todo lo que sale. Es decir `entrada (system + user + tokens de la imagen) +
-    salida (razonamiento + respuesta)`. Es el número que ves en `ollama ps` bajo
-    *context*. Además, **más `num_ctx` deja que Ollama mande la imagen a mayor
-    resolución** (más tokens de imagen → más detalle).
-  - **`max_tokens`** (= `num_predict`) = el **tope de lo que el modelo *genera***
-    (razonamiento + respuesta). Cuando se llega a este tope, corta y devuelve
-    `finish_reason: length` (lo que te pasaba: cortaba en pleno razonamiento).
-  - **Cómo se combinan:** el presupuesto real de salida es
-    `min(max_tokens, num_ctx − tokens_de_entrada)`. O sea, **los dos tienen que
-    alcanzar**: si `max_tokens` es chico, corta aunque sobre `num_ctx`; si
-    `num_ctx` es chico, la entrada (imagen incluida) le come lugar a la salida y
-    también corta. La entrada acá ronda ~1000–2600 tokens, así que con
-    `num_ctx 16384` y `max_tokens 8192` quedan holgados los dos.
-  - **Defaults actuales:** `max_tokens 8192`, `num_ctx 16384` (antes 4096 / 8192,
-    que se quedaban cortos en imágenes difíciles). Subilos más con `--max-tokens`
-    / `--num-ctx` si una imagen sigue truncándose; bajalos si querés más velocidad
-    y tus imágenes son simples.
-- **Latencia vs objetivo F1.8:** el target de **P95 < 1.5 s** no es alcanzable
-  con un VLM de esta clase en este hardware (mejor caso ~15 s). Para acercarse
-  haría falta otro modelo/cuantización, bajar resolución de imagen, o más VRAM.
+- **VRAM / model choice:** on an 8 GB GPU (e.g. RTX 5060), `qwen3-vl:8b`
+  (~10 GB loaded) **doesn't fit** and Ollama splits it ~53% CPU / 47% GPU →
+  ~85–110 s per image. `qwen3-vl:4b` (~3.3 GB) loads **100% on GPU** →
+  ~15–25 s. That's why the default is `4b`. Confirm with `ollama ps`.
+- **Reasoning (thinking) — the flag is NOT an on/off, the MODEL decides it:**
+  tested against Ollama 0.30.6, the reasoning control is **not** a simple
+  `think: true/false` per request, but depends on the model's *capability*
+  (you can see it with `ollama show <model>` or `/api/show`):
 
-## Estructura
+  | model | `thinking` capability | `--think` (ON) | `--no-think` (OFF) |
+  |--------|:---------------------:|----------------|--------------------|
+  | `qwen3-vl:4b` / `:8b` | yes | reasons | **reasons anyway** (the `qwen3-vl-thinking` renderer **ignores** `think:false` in 0.30.6) |
+  | `qwen2.5vl:7b` | no | **HTTP 400 error** if the flag is sent | never reasons (real OFF) |
 
-| Ruta                  | Qué es |
+  In other words: **the real reasoning switch is choosing the model**.
+  `qwen3-vl` always thinks; if you want it to **not** think, use a model without the
+  `thinking` capability (e.g. `qwen2.5vl:7b`). That's why the code queries
+  `/api/show` and **only sends `think` if the model supports it** (it isn't sent to
+  `qwen2.5vl`: otherwise it returns `400 "does not support thinking"` — that used to
+  make the benchmark of that model fail). The UI tells you the truth per model (whether it
+  reasons, whether it was requested and whether it actually reasoned). If you need to turn off
+  the reasoning of `qwen3-vl`, another version of Ollama is needed (in 0.30.6 it's not
+  possible). And watch out: when it reasons, the risk is running out of tokens — if the
+  reasoning eats up the budget, `content` comes back empty
+  (`finish_reason: length`); it's mitigated with the anti-loop prompt (below) and giving it
+  room with `max_tokens` and `num_ctx`. We use the **native** endpoint (`/api/chat`,
+  not `/v1/...`) because it separates the reasoning (`thinking`) from the JSON (`content`) and
+  allows **printing it live**.
+- **Anti-loop prompt (why it ran out of context):** the typical case was an
+  image where the model *recognized* the object (e.g. a bushing / transformer)
+  but got into a loop **debating which family to put it in** (`electrical`? `other`?
+  `control`?) until it exhausted the tokens → empty `content`. The `industrial`
+  prompt now cuts that off at the root:
+  - the `system` asks it to **reason in few steps, without repeating itself, and move to the JSON
+    as soon as it recognizes the object** (not re-evaluate the category);
+  - the `user` starts with an **explicit RULE**: identify at a glance, don't
+    debate, and if it hesitates between two families pick one and put the detail in
+    `description` (or use `other`);
+  - it clarifies that **equipment also counts** (not only measuring instruments)
+    and the families were expanded (`electrical` now includes transformer, bushing,
+    disconnector, breaker, busbar, cell; examples of `valve` and `ppe` were added).
+
+  Expected result: shorter reasoning (faster) and no truncation. Still, it's
+  advisable to leave a token margin for the hard images.
+- **`max_tokens` vs `num_ctx` (the difference that matters):**
+  - **`num_ctx`** = the **full context window**: everything that goes in +
+    everything that comes out. That is, `input (system + user + image tokens) +
+    output (reasoning + answer)`. It's the number you see in `ollama ps` under
+    *context*. Also, **more `num_ctx` lets Ollama send the image at higher
+    resolution** (more image tokens → more detail).
+  - **`max_tokens`** (= `num_predict`) = the **cap on what the model *generates***
+    (reasoning + answer). When this cap is reached, it cuts off and returns
+    `finish_reason: length` (what was happening to you: it cut off mid-reasoning).
+  - **How they combine:** the real output budget is
+    `min(max_tokens, num_ctx − input_tokens)`. That is, **both have to
+    suffice**: if `max_tokens` is small, it cuts off even if `num_ctx` is plentiful; if
+    `num_ctx` is small, the input (image included) eats into the output's room and
+    it also cuts off. The input here is around ~1000–2600 tokens, so with
+    `num_ctx 16384` and `max_tokens 8192` both stay comfortable.
+  - **Current defaults:** `max_tokens 8192`, `num_ctx 16384` (previously 4096 / 8192,
+    which fell short on hard images). Raise them further with `--max-tokens`
+    / `--num-ctx` if an image keeps truncating; lower them if you want more speed
+    and your images are simple.
+- **Latency vs the F1.8 target:** the target of **P95 < 1.5 s** is not achievable
+  with a VLM of this class on this hardware (best case ~15 s). To get closer
+  you'd need another model/quantization, lower image resolution, or more VRAM.
+
+## Structure
+
+| Path                  | What it is |
 |-----------------------|--------|
-| `menu.py`             | Menú interactivo (entrada principal). |
-| `src/smoke_test.py`   | Smoke test de 1 imagen (CLI). |
-| `src/benchmark.py`    | Benchmark de latencia/JSON + A/B de prompts (CLI). |
-| `src/vlm_common.py`   | Núcleo compartido: prompts (`PROMPT_VARIANTS`/`SCOPES`), cliente Ollama, config. |
-| `config.json`         | Configuración persistente (se crea sola, en la raíz). |
-| `fotos/clean/`, `fotos/ciudad/` | Imágenes de prueba. |
-| `results/`            | Salida de los benchmarks (JSON). |
+| `menu.py`             | Interactive menu (main entry point). |
+| `src/smoke_test.py`   | Smoke test of 1 image (CLI). |
+| `src/benchmark.py`    | Latency/JSON benchmark + prompt A/B (CLI). |
+| `src/vlm_common.py`   | Shared core: prompts (`PROMPT_VARIANTS`/`SCOPES`), Ollama client, config. |
+| `config.json`         | Persistent configuration (created on its own, at the root). |
+| `fotos/clean/`, `fotos/ciudad/` | Test images. |
+| `results/`            | Benchmark output (JSON). |
