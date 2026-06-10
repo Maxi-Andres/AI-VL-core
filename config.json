@@ -1,15 +1,14 @@
 {
   "model": "qwen3-vl:4b-instruct",
-  "image": "fotos/clean/10.jpeg",
+  "image": "fotos/clean/3.jpeg",
   "folder": "fotos/clean",
   "scope": "industrial",
-  "variant": "v2_antiloop",
-  "max_tokens": 4096,
-  "num_ctx": 8192,
+  "variant": "v3_minimal",
+  "max_tokens": 512,
+  "num_ctx": 4096,
   "think": false,
   "url": "http://localhost:11434",
   "benchmark_models": [
-    "qwen3-vl:4b",
     "qwen3-vl:4b-instruct"
   ],
   "benchmark_runs": 1,
@@ -27,15 +26,15 @@
   ],
   "benchmark_scope": "industrial",
   "benchmark_variants": [
-    "v2_antiloop"
+    "v3_minimal"
   ],
   "benchmark_max_tokens": [
-    4096
+    512
   ],
   "benchmark_num_ctx": [
-    8192
+    4096
   ],
   "benchmark_think": [
-    true
+    false
   ]
 }

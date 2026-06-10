@@ -21,6 +21,33 @@ DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre
 
 - que este la mejor config y la actual, y una manera de pasar la actual a la mejor, luego de pruebas y tocar cosas, y tambien una manera de guardar la mejor si hay una mejor
 
+- !FIJATE pensa esto, no tiene sentido analizar fotograma por fotograma de el video, lo que se puede hacer es que YOLO corra todos los frames para ver que realmente haya algo (ej: de 30 frames en 28 detecto una botella) y hacer el promedio de si detecto bien, y despues de 30 en 1 corres Qwen3 para tomar decisiones complejas y preguntas mas piolas (yolo detecta 2 botellas y despues yo le pregunto a qwen el color por ejemplo)
+
+- en el tiempo tenes que considerar la primera deteccion que tarda mas por que se carga el modelo en vram
+
+------------------------------------------------------------------------------------------------------------------------------------------------
+
+- Caché de Ollama: la 1ª vez que ve una imagen hace el prefill completo (~9s); si repetís la misma imagen (o ya la vio en un combo anterior), devuelve un cache-hit en ~1s. Los "1s" que vi al principio eran imágenes ya cacheadas, no nuevas.
+- Recarga del modelo: cada vez que cambia num_ctx, Ollama recarga el modelo (~10s), y ese costo caía sobre la 1ª llamada de cada combo, inflando las mediciones.
+
+Qué hace cada parámetro (real)
+
+- max_tokens: irrelevante. El instruct devuelve ~75 tokens y corta solo (finish_reason: stop); nunca toca el tope. Lo dejé en 512. (ESTO INFLUYE PARA CUANDO SE CORTABA EL THINK MODEL POR MUCHO OUTPUT, EN LOS MODELOS QUE NO PIENSAN NO IMPORTA)
+- prompt (v3_minimal vs v1): misma velocidad y misma calidad. El prefill lo dominan los tokens de la imagen, no las ~150 palabras del prompt. Dejé v3_minimal igual (es más limpio).
+- num_ctx: no cambia la velocidad entre 2048–4096, pero imágenes grandes (ej. 18.jpeg) dan error 400 por debajo de 3072. → conviene 4096 (entra todo, 100% en GPU).
+- El verdadero acelerón ya estaba aplicado: usar instruct en vez de thinking (~9s vs ~18s).
+
+Config que dejé (la más rápida y robusta)
+
+model=qwen3-vl:4b-instruct, variant=v3_minimal, num_ctx=4096, max_tokens=512, think=false (en smoke y benchmark).
+
+Para bajar de ~9s de verdad (próximos levers, no estos knobs)
+
+1. Mantener el modelo caliente (keep_alive en Ollama) y no cambiar num_ctx → te ahorrás la recarga de ~10s.
+2. Pre-reducir la resolución de las imágenes antes de mandarlas (menos tokens de visión = menos prefill). Esto sí atacaría los ~9s, pero requiere agregar redimensionado (p. ej. Pillow) a encode_image.
+3. GPU con más VRAM / otra cuantización.
+
+Si querés, implemento el redimensionado de imágenes (lever #2) y lo benchmarkeo para ver cuánto baja — es la opción con más chance de reducir el tiempo real. Como siempre, no commiteé nada; quedan todos los cambios para tu revisión.
 
 ------------------------------------------------------------------------------------------------------------------------------------------------
 

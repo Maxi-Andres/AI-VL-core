@@ -210,6 +210,28 @@ _INDUSTRIAL_V2 = {
     ),
 }
 
+# --- Industrial: variant v3 = minimal (fewest input tokens -> faster prefill) -
+# Same JSON contract, but as terse as possible: shorter prompt = fewer input
+# tokens = faster prefill, which dominates latency on a non-reasoning model like
+# qwen3-vl:4b-instruct. The family list is collapsed to a single enum line.
+_INDUSTRIAL_V3 = {
+    "system": (
+        "You are an industrial inspection assistant (mining, oil & gas). "
+        "Detect any plant instrument, equipment or object. "
+        "Respond with ONLY a valid JSON object: no markdown, no extra text."
+    ),
+    "user": (
+        "Detect every industrial instrument, equipment or object in the image. "
+        'Return ONLY {"objects": [ ... ]}, where each item has: '
+        '"type" (one of pressure|temperature|flow|level|electrical|analysis|control|vibration|valve|ppe|other), '
+        '"description" (short), '
+        '"bbox" ([x_min, y_min, x_max, y_max] normalized 0-1), '
+        '"reading" (the instrument value if legible, else null), '
+        '"confidence" (0-1). '
+        "Empty list only if there is nothing of interest."
+    ),
+}
+
 # --- All: single variant ------------------------------------------------------
 _ALL_DEFAULT = {
     "system": (
@@ -236,6 +258,7 @@ PROMPT_VARIANTS = {
     "industrial": {
         "v1_original": _INDUSTRIAL_V1,
         "v2_antiloop": _INDUSTRIAL_V2,
+        "v3_minimal": _INDUSTRIAL_V3,
     },
     "all": {
         "default": _ALL_DEFAULT,
