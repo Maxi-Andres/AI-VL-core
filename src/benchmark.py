@@ -38,6 +38,7 @@ import os
 import statistics
 import sys
 import time
+from datetime import datetime
 
 import requests
 
@@ -145,8 +146,11 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
                    model that DOES respect the flag; see model_supports_thinking()).
 
     Each combination is one row in the report. Prints times + JSON% + truncations +
-    objects per combination and a final verdict. Returns the results dict
-    (also saves it to `out`, inside results/ if no path is passed).
+    objects per combination and a final verdict. Returns the results dict and saves
+    the full payload (metrics PLUS the per-image detections — what the model actually
+    returned for each image/run) to `out`. If `out` is None it writes a NEW
+    timestamped file under results/ (results/benchmark_<timestamp>.json) so separate
+    runs never overwrite each other and can be compared.
     """
     images = [p for p in images if os.path.exists(p)]
     if not images:
@@ -216,9 +220,15 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
         latencies, valid, errors, total, trunc, objs = [], 0, 0, 0, 0, []
         thought = 0  # how many times the model actually reasoned
         per_image = {}  # img -> list of latencies
+        # Per-image detections: what the model actually returned, run by run, so you
+        # can inspect WHAT it detected (not just the aggregate metrics).
+        # NOTE: query_vlm only receives the base64 image bytes + the fixed prompt —
+        # the file name/path is NEVER sent to the model (that would be cheating).
+        detections = {}
         for img in images:
             name = os.path.basename(img)
             per_image.setdefault(name, [])
+            detections.setdefault(name, [])
             for r in range(1, runs + 1):
                 total += 1
                 done += 1
@@ -243,8 +253,17 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
                         trunc += 1
                     if res.get("did_think"):
                         thought += 1
+                    # Save what the model returned for this image/run.
+                    entry = {"run": r, "elapsed_s": round(res["elapsed"], 2),
+                             "ok": res["ok"], "finish_reason": res["finish_reason"]}
+                    if res["ok"]:
+                        entry["result"] = res["parsed"]   # the full {"objects": [...]}
+                    else:
+                        entry["raw"] = res["content"]      # unparseable text, for debugging
+                    detections[name].append(entry)
                 except requests.RequestException as e:
                     errors += 1
+                    detections[name].append({"run": r, "ok": False, "error": str(e)})
                     progress_bar(done, total_calls, suffix=f"ERROR on {name}")
                     print(f"\n  [!] {name}: ERROR {e}")
                     continue
@@ -273,20 +292,25 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
         stats["think"] = combo["think"]
         stats["thinking_supported"] = model_supports_thinking(model, url)
         stats["thought"] = thought  # how many runs actually reasoned
+        stats["detections"] = detections  # what the model returned per image/run
         results[label] = stats
         print()
 
     bench_wall = time.perf_counter() - bench_t0
 
     # ---------------- Comparison summary + times ----------------
-    header = (f"{'Model':16s} {'Prompt':13s} {'ctx':>6s} {'maxtok':>6s} {'thk':>3s} "
+    # Size the variable-width text columns (Model/Prompt) to the widest value so
+    # long model names (e.g. qwen3-vl:4b-instruct) don't push the rest out of line.
+    mw = max([len("Model")] + [len(r["model"]) for r in results.values()])
+    pw = max([len("Prompt")] + [len(r["variant"]) for r in results.values()])
+    header = (f"{'Model':{mw}s}  {'Prompt':{pw}s}  {'ctx':>6s} {'maxtok':>6s} {'thk':>3s} "
               f"{'P50':>7s} {'P95':>7s} {'Mean':>7s} {'Min':>7s} {'Max':>7s} "
               f"{'Total':>8s} {'JSON%':>7s} {'Trunc':>6s} {'~obj':>5s} {'Errs':>5s}")
     print("=" * len(header))
     print(header)
     print("-" * len(header))
     for r in results.values():
-        print(f"{r['model']:16s} {r['variant']:13s} {r['num_ctx']:>6d} {r['max_tokens']:>6d} "
+        print(f"{r['model']:{mw}s}  {r['variant']:{pw}s}  {r['num_ctx']:>6d} {r['max_tokens']:>6d} "
               f"{('ON' if r['think'] else 'OFF'):>3s} {fmt_secs(r['p50']):>7s} "
               f"{fmt_secs(r['p95']):>7s} {fmt_secs(r['mean']):>7s} {fmt_secs(r['min']):>7s} "
               f"{fmt_secs(r['max']):>7s} {fmt_secs(r['total_time']):>8s} {r['json_rate']:6.1f}% "
@@ -310,13 +334,17 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
                   f"\"variant\"={r['variant']!r}, \"max_tokens\"={r['max_tokens']}, "
                   f"\"num_ctx\"={r['num_ctx']}, \"think\"={str(r['think']).lower()}.")
 
-    payload = {"config": {"runs": runs, "scope": scope, "variants": variants,
-                          "models": models, "max_tokens": max_tokens_list,
-                          "num_ctx": num_ctx_list, "think": think_list,
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    payload = {"config": {"timestamp": stamp, "runs": runs, "scope": scope,
+                          "variants": variants, "models": models,
+                          "max_tokens": max_tokens_list, "num_ctx": num_ctx_list,
+                          "think": think_list,
                           "images": [os.path.basename(i) for i in images],
                           "total_wall_s": round(bench_wall, 2)},
                "results": results}
-    out = out or results_path("benchmark_resultados.json")
+    # Each run goes to its OWN timestamped file so runs don't overwrite each other
+    # and can be compared. Pass `out` to override the name.
+    out = out or results_path(f"benchmark_{stamp}.json")
     with open(out, "w", encoding="utf-8") as f:
         json.dump(payload, f, indent=2, ensure_ascii=False)
     print(f"\n[OK] Saved to {out}")
@@ -353,6 +381,9 @@ def main():
     ap.add_argument("--think", nargs="+", default=cfg.get("benchmark_think", [True]),
                     help="One or SEVERAL reasoning values to compare: true/false "
                          "(e.g. --think true false). Only applies to models with the 'thinking' capability.")
+    ap.add_argument("--out", default=None,
+                    help="Output file path. Default: results/benchmark_<timestamp>.json "
+                         "(each run gets its own file so runs don't overwrite each other).")
     args = ap.parse_args()
 
     # Validate variants against the chosen scope.
@@ -384,7 +415,7 @@ def main():
 
     res = run_benchmark(images, args.models, runs=args.runs, scope=args.scope,
                         max_tokens=args.max_tokens, think=think_vals, url=args.url,
-                        num_ctx=args.num_ctx, variants=args.variants)
+                        num_ctx=args.num_ctx, variants=args.variants, out=args.out)
     sys.exit(0 if res else 1)
 
 

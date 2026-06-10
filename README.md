@@ -152,6 +152,7 @@ python3 src/benchmark.py fotos/clean --scope all --runs 1
 | `--max-tokens`  | `benchmark_max_tokens` | One or **several** output caps (`num_predict`) to compare (e.g. `4096 8192`). |
 | `--num-ctx`     | `benchmark_num_ctx`    | One or **several** context windows to compare (e.g. `8192 16384`). |
 | `--think`       | `benchmark_think`      | One or **several** `true`/`false` values to compare (e.g. `--think true false`). Only changes anything on models with the `thinking` capability; see the reasoning note. |
+| `--out`         | (timestamped)          | Output file. Default `results/benchmark_<timestamp>.json` (each run gets its own file). |
 | `--url`         | `url`                  | Ollama host. |
 
 While running it shows a **progress bar** (current combination/image, %
@@ -160,7 +161,13 @@ and ETA). When it finishes it prints the **time per image** (avg/min/max) and a 
 P50/P95/mean/min/max/total + JSON% + `length` cutoffs + average objects; it closes
 with a **verdict** that gives you the **full config** of the best combination
 (model + variant + max_tokens + num_ctx + think), ready to paste into `config.json`.
-It saves everything to `results/benchmark_resultados.json`.
+Each run is saved to its **own timestamped file** — `results/benchmark_<YYYYMMDD_HHMMSS>.json`
+(or pass `--out path.json`) — so separate runs **never overwrite each other** and can be
+compared. The file holds both the metrics **and the per-image detections**: under each
+combination, `detections` maps every image to what the model actually returned per run
+(the full `{"objects": [...]}`), so you can inspect *what* it detected, not just the
+aggregate numbers. The image **file names are never sent to the model** (only the image
+bytes + the fixed prompt), so it can't "cheat" by reading the name.
 
 > **Context note (speed):** the benchmark starts with `num_ctx=8192` /
 > `max_tokens=4096` — **half** of what the smoke test uses (16384 / 8192).

@@ -3,6 +3,8 @@
 
 - !FIJATE de mas adelante cuando este el robot y tenga que pensar mas si quiza combiene alternar entre ambos modelos, el instruct y el thinking dependiendo la tarea, ademas de usar yolo 
 
+- !FIJATE de probar de meter un VLA en el medio o directamente sacar el VLM investiga eso (igual en esta compu los dos no pueden correr)
+
 - creo que hay un cuello de botella, cuando analizas una foto como que tarda mas, pero despues si haces la segunda tarda menos
 como que tarda el primer intento por que le cargas el modelo a la GPU? se podra implementar algo para que este siempre cargado? 
 o que pueda definir si pre-cargarlo para despues usarlo por que necesito los menores tiempos posibles, por que necesito velocidad cuando este implementado el robot
@@ -11,10 +13,11 @@ el tiempo desde que toco enter hasta que veo como imprime lo que piensa y tambie
 
 - dale accesso a claude para que pruebe con distintos prompts, max_tokens, etc, para intentar reducir el tiempo al maximo 
 
-- pasa todo el codigo a ingles
+DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre ellos si no no se puede comparar, y que en estos ademas de lo que se guarda tambien se guarden los jsons de cada imagen que detectan para poder ver que pusieron, verificar tambien que la ia no lea los nombres de las imagenes, eso es trampa
+
 - hace un front real para no usar mas la consola fijate si podes hacer que python sea el back end
 
-- !provar que onda YOLOv8 o v11 quiza son mas rapidos o podes usar eso para hacer rapido y despues los vl para el movimiento de el robot y las respuestas a comandos de voz
+- !FIJATE de provar que onda YOLOv8 o v11 quiza son mas rapidos o podes usar eso para hacer rapido y despues los vl para el movimiento de el robot y las respuestas a comandos de voz
 
 - que este la mejor config y la actual, y una manera de pasar la actual a la mejor, luego de pruebas y tocar cosas, y tambien una manera de guardar la mejor si hay una mejor
 
