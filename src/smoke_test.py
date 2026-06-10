@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-03_smoke_test.py — Validación rápida del VLM sobre una imagen del lab.
+smoke_test.py — Validación rápida del VLM sobre una imagen del lab.
 
 Manda una imagen al endpoint NATIVO de Ollama (/api/chat, vía vlm_common) y pide
 identificar objetos devolviendo JSON con bounding boxes. El contrato JSON es el
@@ -10,9 +10,9 @@ que va a consumir el Silk AI Proxy Gateway / F1.9.
 
 Requisitos:  pip install requests
 Uso:
-    python3 03_smoke_test.py fotosClean/2.jpeg
-    python3 03_smoke_test.py fotosClean/2.jpeg --model qwen3-vl:8b
-    python3 03_smoke_test.py fotosClean/2.jpeg --scope todo --think
+    python3 src/smoke_test.py fotos/clean/2.jpeg
+    python3 src/smoke_test.py fotos/clean/2.jpeg --model qwen3-vl:8b
+    python3 src/smoke_test.py fotos/clean/2.jpeg --scope todo --think
 """
 import argparse
 import sys
@@ -21,7 +21,6 @@ import requests
 
 from vlm_common import (
     OLLAMA_HOST,
-    PROMPT_VARIANTS,
     SCOPES,
     encode_image,
     image_size,
@@ -71,7 +70,8 @@ def main():
                     help="Modo de detección: industrial (solo instrumentos) | todo (cualquier objeto)")
     ap.add_argument("--variant", default=cfg.get("variant"),
                     help="Variante de prompt (ej. v1_original, v2_antiloop). "
-                         "Default: el de config.json. Ver: python3 05_prompt_test.py --list")
+                         "Default: el de config.json. Las variantes se comparan "
+                         "con python3 src/benchmark.py --variants ...")
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
                     help="Tope de tokens de SALIDA / num_predict (incluye razonamiento)")

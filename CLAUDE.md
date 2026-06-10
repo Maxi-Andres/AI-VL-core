@@ -9,19 +9,24 @@ A PoC harness for evaluating vision-language models (VLMs) served by **Ollama** 
 ## Commands
 
 ```bash
-pip install requests                 # only dependency
+pip install -r requirements.txt      # only dependency: requests
 
 # Interactive menu (main entry point) — pick model/image/scope, persists to config.json
 python3 menu.py
 
 # Smoke test: one image, prints latency + parsed JSON
-python3 03_smoke_test.py fotosClean/1.jpeg
-python3 03_smoke_test.py fotosClean/1.jpeg --model qwen3-vl:4b --scope todo
+python3 src/smoke_test.py fotos/clean/1.jpeg
+python3 src/smoke_test.py fotos/clean/1.jpeg --model qwen3-vl:4b --scope todo
 
-# Benchmark: all images in a folder, N runs per image, across models
-python3 04_benchmark.py ./fotosClean --runs 3
-python3 04_benchmark.py ./fotosClean --models qwen3-vl:8b qwen3-vl:4b
+# Benchmark: all images in a folder, N runs per image, across models AND prompt variants
+python3 src/benchmark.py ./fotos/clean --runs 3
+python3 src/benchmark.py ./fotos/clean --models qwen3-vl:8b qwen3-vl:4b
+python3 src/benchmark.py ./fotos/clean --variants v1_original v2_antiloop   # A/B prompts
 ```
+
+The code lives in `src/`; `menu.py` (the entry point) stays at the repo root and
+bootstraps `src/` onto `sys.path`. The `src/` scripts import each other as
+siblings, so they also run directly (`python3 src/benchmark.py …`).
 
 See `README.md` for the full flag reference.
 
@@ -41,12 +46,12 @@ Reasoning is **streamed live**: the smoke test (and menu) print the model's thin
 
 ## Architecture
 
-All entry points share **`vlm_common.py`** — there is no longer any prompt/client duplication. Change prompts, the JSON schema, or the Ollama client in that one module and every entry point picks it up. Layout:
+All entry points share **`src/vlm_common.py`** — there is no longer any prompt/client duplication. Change prompts, the JSON schema, or the Ollama client in that one module and every entry point picks it up. Layout:
 
-- `vlm_common.py` — the core. Holds `SCOPES` (the detection-mode prompts), `query_vlm()` (the streaming Ollama client), `extract_json()`/`render_result()`, `image_size()`/`normalize_bboxes()` (bbox post-processing), and the `config.json` load/save (`DEFAULT_CONFIG`, `load_config`, `save_config`).
-- `menu.py` — interactive launcher (run with no args / IDE "Play"). Reads/writes `config.json`, lists Ollama models via `/api/tags`, lists images from the folder, and calls `run_smoke` / `run_benchmark` (imported from the numbered scripts via `importlib`, since `03_...` isn't a valid module identifier).
-- `03_smoke_test.py` — single-image check. Exposes `run_smoke(...)`; `main()` just parses args (defaults pulled from `config.json`) and calls it.
-- `04_benchmark.py` — latency/reliability benchmark. Exposes `run_benchmark(...)`; computes P50/P95/mean latency and JSON-valid rate per model, prints a table, writes `benchmark_resultados.json`.
+- `src/vlm_common.py` — the core. Holds `SCOPES` (the detection-mode prompts), `query_vlm()` (the streaming Ollama client), `extract_json()`/`render_result()`, `image_size()`/`normalize_bboxes()` (bbox post-processing), the `config.json` load/save (`DEFAULT_CONFIG`, `load_config`, `save_config`), and `PROJECT_ROOT`/`RESULTS_DIR`/`results_path()` (paths resolve relative to the repo root, not `src/`).
+- `menu.py` — interactive launcher at the repo root (run with no args / IDE "Play"). Inserts `src/` on `sys.path`, then imports `run_smoke`/`run_benchmark` as normal modules (no more `importlib` numeric-name hack — the scripts dropped their `0N_` prefixes). Reads/writes `config.json`, lists Ollama models via `/api/tags`, lists images from the folder.
+- `src/smoke_test.py` — single-image check. Exposes `run_smoke(...)`; `main()` just parses args (defaults pulled from `config.json`) and calls it.
+- `src/benchmark.py` — latency/reliability benchmark **and** prompt A/B. Exposes `run_benchmark(...)`; sweeps the **models × prompt-variants** product, computes P50/P95/mean latency, JSON-valid rate, length-truncations and avg objects per combination, prints a comparison table + a best-combination verdict, and writes `results/benchmark_resultados.json`. (This subsumes the old `05_prompt_test.py`, which was removed: prompt variants are now compared the same way models are, via `--variants` / the benchmark submenu.)
 
 Both scripts hit Ollama's **native** endpoint (`/api/chat`) with `stream: true`, **not** the OpenAI-compatible `/v1/chat/completions`. This was a deliberate switch: the OpenAI endpoint ignores `think` and mixes reasoning into `content` (so a thinking model can return empty `content`), whereas the native endpoint puts reasoning in a separate `thinking` field and the JSON answer cleanly in `content`. Streaming is what lets us print the reasoning live. Images go in the message's `images: [base64]` array (raw base64, no data-URI prefix). Requests use `format: "json"` and `options: {temperature: 0.1, num_predict: max_tokens, num_ctx}`. `host_of()` normalizes any `url` (including an old `…/v1/chat/completions` from a stale `config.json`) down to the base host before appending `/api/chat`.
 
@@ -62,7 +67,7 @@ An empty `{"objetos": []}` means the model genuinely saw nothing matching the sc
 
 ### config.json
 
-Created on first run from `DEFAULT_CONFIG`. The CLI scripts read it for their defaults; any flag overrides for that run only (does not write back). The menu writes choices back. Keys: `model`, `image`, `folder`, `scope`, `max_tokens`, `num_ctx`, `think`, `url`, `benchmark_models`, `benchmark_runs`.
+Lives at the repo root (path computed from `PROJECT_ROOT`, not next to `vlm_common.py` inside `src/`). Created on first run from `DEFAULT_CONFIG`. The CLI scripts read it for their defaults; any flag overrides for that run only (does not write back). The menu writes choices back. Smoke-test keys: `model`, `image`, `folder`, `scope`, `variant`, `max_tokens`, `num_ctx`, `think`, `url`. Benchmark has its own independent block: `benchmark_models`, `benchmark_runs`, `benchmark_images` (`[]` = all in folder), `benchmark_scope`, `benchmark_variants` (a **list** — note the plural; replaced the old singular `benchmark_variant`), `benchmark_max_tokens`, `benchmark_num_ctx`, `benchmark_think`.
 
 ### Evaluation targets (from internal doc "F1.8")
 
@@ -70,4 +75,4 @@ The benchmark exists to pick the primary VLM for the PoC against three criteria:
 
 ## Data
 
-`fotosClean/` holds the lab test images (`*.jpeg`). Supported extensions in the benchmark: jpg, jpeg, png, bmp, webp.
+Image folders live under `fotos/`: `fotos/clean/` holds the lab test images (`*.jpeg`) and `fotos/ciudad/` an additional set. Supported extensions in the benchmark: jpg, jpeg, png, bmp, webp. Benchmark output (JSON) is written to `results/` (git-ignored except for the folder itself), not the repo root.

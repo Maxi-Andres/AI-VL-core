@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Resultados de benchmarks (se regeneran; se versiona solo la carpeta)
+results/*.json

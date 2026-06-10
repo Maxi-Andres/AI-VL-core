@@ -1,7 +1,7 @@
 {
   "model": "qwen3-vl:4b",
-  "image": "fotosClean/4.jpeg",
-  "folder": "fotosClean",
+  "image": "fotos/clean/19.jpeg",
+  "folder": "fotos/clean",
   "scope": "industrial",
   "variant": "v2_antiloop",
   "max_tokens": 8192,
@@ -9,9 +9,21 @@
   "think": true,
   "url": "http://localhost:11434",
   "benchmark_models": [
-    "qwen3-vl:8b",
-    "qwen3-vl:4b",
-    "qwen2.5vl:7b"
+    "qwen3-vl:4b"
   ],
-  "benchmark_runs": 3
+  "benchmark_runs": 1,
+  "benchmark_images": [
+    "1.jpeg",
+    "2.jpeg",
+    "3.jpeg",
+    "4.jpeg"
+  ],
+  "benchmark_scope": "industrial",
+  "benchmark_variants": [
+    "v1_original",
+    "v2_antiloop"
+  ],
+  "benchmark_max_tokens": 4096,
+  "benchmark_num_ctx": 8192,
+  "benchmark_think": true
 }

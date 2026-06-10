@@ -8,7 +8,7 @@ Acá viven, en un solo lugar para no duplicar:
   - El parseo robusto de JSON + normalización de bounding boxes
   - La config persistente en config.json
 
-No se ejecuta solo; lo importan menu.py / 03_smoke_test.py / 04_benchmark.py.
+No se ejecuta solo; lo importan menu.py / src/smoke_test.py / src/benchmark.py.
 
 ¿Por qué el endpoint nativo y no el OpenAI-compatible?
 ---------------------------------------------------------------------------
@@ -21,6 +21,7 @@ respuesta (campo `content`), así que el JSON sale limpio y además podemos
 imprimir en vivo lo que el modelo va pensando.
 """
 import base64
+import glob
 import json
 import os
 import re
@@ -38,8 +39,21 @@ OLLAMA_URL = OLLAMA_HOST
 # Extensiones de imagen que reconoce el benchmark al barrer una carpeta.
 IMG_EXTS = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp")
 
-# Archivo de configuración persistente (al lado de este módulo).
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+# Raíz del proyecto = carpeta que contiene a src/ (este módulo vive en src/).
+# Todo lo "de proyecto" (config.json, results/) cuelga de acá, no de src/.
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# Archivo de configuración persistente (en la raíz del proyecto).
+CONFIG_PATH = os.path.join(PROJECT_ROOT, "config.json")
+
+# Carpeta donde se guardan los resultados de los benchmarks (no sueltos en la raíz).
+RESULTS_DIR = os.path.join(PROJECT_ROOT, "results")
+
+
+def results_path(name):
+    """Devuelve la ruta a un archivo dentro de results/, creando la carpeta si falta."""
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+    return os.path.join(RESULTS_DIR, name)
 
 
 def host_of(url):
@@ -65,7 +79,7 @@ def host_of(url):
 #   "todo":       CUALQUIER objeto visible (industrial o no), categoría libre.
 #
 # Cada scope tiene VARIANTES de prompt en PROMPT_VARIANTS, para poder comparar
-# cuál es más rápida/mejor (ver 05_prompt_test.py). Los prompts están en INGLÉS
+# cuál es más rápida/mejor (con el benchmark, --variants). Los prompts están en INGLÉS
 # (el modelo razona en inglés; se busca menos overhead). Las KEYS y los valores
 # de `tipo` del JSON quedan en español porque son el contrato VLM->VLA.
 #
@@ -174,7 +188,8 @@ _TODO_DEFAULT = {
     ),
 }
 
-# Registro de variantes por scope. Agregá las que quieras y testealas con 05_prompt_test.py.
+# Registro de variantes por scope. Agregá las que quieras y compará con
+# `python3 src/benchmark.py --variants <a> <b>` (o desde el submenú de benchmark).
 PROMPT_VARIANTS = {
     "industrial": {
         "v1_original": _INDUSTRIAL_V1,
@@ -216,16 +231,31 @@ SCOPES = {
 # --------------------------------------------------------------------------- #
 DEFAULT_CONFIG = {
     "model": "qwen3-vl:4b",            # 4b entra 100% en 8GB de VRAM; el 8b se parte CPU/GPU
-    "image": "fotosClean/1.jpeg",      # imagen para el smoke test
-    "folder": "fotosClean",            # carpeta para el benchmark
+    "image": "fotos/clean/1.jpeg",     # imagen para el smoke test
+    "folder": "fotos/clean",           # carpeta para el benchmark
     "scope": "industrial",             # modo de detección (industrial | todo)
     "variant": "v1_original",          # variante de prompt activa (ver PROMPT_VARIANTS); None = default del scope
     "max_tokens": 8192,                # tope de tokens de SALIDA (num_predict; incluye el razonamiento)
     "num_ctx": 16384,                  # ventana de contexto (entrada+salida); la que muestra `ollama ps`
     "think": True,                     # razonamiento del modelo (en qwen3-vl no se puede apagar de verdad; mejor verlo)
     "url": OLLAMA_HOST,                # host de Ollama
+
+    # --- Benchmark: tiene su PROPIA config, independiente del smoke test ------
+    # Así podés correr el benchmark con un contexto más liviano (más rápido) sin
+    # bajarle el contexto al smoke test. Todo esto se edita desde el submenú de
+    # benchmark (opción 2 del menú principal).
+    #
+    # El benchmark barre el producto MODELOS × VARIANTES: igual que comparás
+    # varios modelos, ahora comparás varias variantes de prompt en la misma
+    # corrida (esto reemplaza al viejo 05_prompt_test.py).
     "benchmark_models": ["qwen3-vl:8b", "qwen3-vl:4b", "qwen2.5vl:7b"],
-    "benchmark_runs": 3,               # repeticiones por imagen en el benchmark
+    "benchmark_runs": 3,               # repeticiones por imagen
+    "benchmark_images": [],            # imágenes elegidas a mano ([] = TODAS las de la carpeta)
+    "benchmark_scope": "industrial",   # modo de detección del benchmark
+    "benchmark_variants": ["v2_antiloop"],  # variantes de prompt a comparar (lista; ver PROMPT_VARIANTS)
+    "benchmark_max_tokens": 4096,      # tope de SALIDA del benchmark (la mitad del smoke: más rápido)
+    "benchmark_num_ctx": 8192,         # ventana de contexto del benchmark (la mitad: prefill más rápido)
+    "benchmark_think": True,           # razonamiento durante el benchmark
 }
 
 
@@ -422,6 +452,52 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
         "in_tokens": in_tok,
         "out_tokens": out_tok,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Helpers de listado de imágenes y de UI (barra de progreso / tiempos)
+# --------------------------------------------------------------------------- #
+def natural_key(path):
+    """Ordena 1,2,...,10 en vez de 1,10,2 (orden 'natural') por nombre de archivo."""
+    nums = re.findall(r"\d+", os.path.basename(path))
+    return (int(nums[0]) if nums else 0, os.path.basename(path))
+
+
+def list_images(folder):
+    """Lista todas las imágenes soportadas de una carpeta, en orden natural."""
+    imgs = []
+    for ext in IMG_EXTS:
+        imgs.extend(glob.glob(os.path.join(folder, ext)))
+    return sorted(imgs, key=natural_key)
+
+
+def fmt_secs(s):
+    """Formatea segundos como '12.3s' o '2m05s' para que se lea fácil."""
+    if s != s:  # NaN
+        return "  -  "
+    if s < 60:
+        return f"{s:.1f}s"
+    m, sec = divmod(int(round(s)), 60)
+    return f"{m}m{sec:02d}s"
+
+
+def progress_bar(done, total, suffix="", width=24):
+    """Dibuja/actualiza una barra de progreso en una sola línea (carriage return).
+
+    Cuando done >= total baja de línea para no pisar lo que venga después.
+    No usa dependencias: solo caracteres de bloque y \\r.
+    """
+    total = max(total, 1)
+    frac = min(done / total, 1.0)
+    filled = int(round(width * frac))
+    bar = "█" * filled + "░" * (width - filled)
+    line = f"\r  [{bar}] {frac * 100:5.1f}% ({done}/{total})"
+    if suffix:
+        line += f" | {suffix}"
+    # Pad para tapar restos de una línea anterior más larga.
+    print(line.ljust(100)[:120], end="", flush=True)
+    if done >= total:
+        print()
 
 
 def render_result(model, res):

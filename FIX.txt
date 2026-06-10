@@ -46,27 +46,20 @@ ademas que te ponga los tiempos y todo, tiempo entre imagenes, tiepo en total, e
 pero si tiene poco contexto no puede y falla ver diferencia netre max-tokens y num_ctx
 
 
-esto dijo: supuestamente mas contexto es mas lento
-El hallazgo importante (tu premisa no se sostuvo)
 
-Probé v1_original vs v2_antiloop y la nueva es más rápida en las 3 imágenes, no más lenta:
 
-┌────────┬─────────────┬─────────────┐
-│ imagen │ v1_original │ v2_antiloop │
-├────────┼─────────────┼─────────────┤
-│ 16     │ 97.2 s      │ 14.9 s      │
-├────────┼─────────────┼─────────────┤
-│ 1      │ 23.8 s      │ 11.8 s      │
-├────────┼─────────────┼─────────────┤
-│ 14     │ 30.3 s      │ 21.4 s      │
-└────────┴─────────────┴─────────────┘
 
-Por qué v2 es más rápida: al frenar la deliberación de categoría, gasta muchos menos tokens de razonamiento.
 
-Mi sospecha de qué viste vos: la lentitud que notaste probablemente no era el prompt sino el bump de num_ctx (8192 → 16384) que metí en el turno anterior — más contexto = Ollama manda la imagen a más resolución = prefill más lento, con cualquier prompt. Si querés velocidad pura, podés bajar num_ctx (v2 no se trunca igual porque no entra en loop).
+Diferencia entre max_tokens y num_ctx
 
-Una decisión tuya
+- num_ctx = la ventana de contexto completa: todo lo que entra (system + prompt + tokens de la imagen) + todo lo que sale (razonamiento + respuesta). Es el número que ves en ollama ps. Más num_ctx → la imagen entra a más resolución (más detalle) pero el prefill es más lento. Por eso "más contexto = más lento".
+- max_tokens (= num_predict) = el tope de lo que el modelo genera (razonamiento + respuesta). Si lo alcanza, corta → finish_reason: length y el content puede venir vacío.
+- Cómo se combinan: la salida real disponible es min(max_tokens, num_ctx − tokens_de_entrada). Los dos tienen que alcanzar: si max_tokens es chico corta aunque sobre num_ctx; si num_ctx es chico, la imagen le come lugar a la respuesta y también se traba. Por eso "poco contexto se traba, mucho contexto va lento" — hay que encontrar el punto medio (8192 / 4096 funcionó bien acá).
 
-Dejé v1_original como default porque lo pediste explícitamente, pero los datos rápida y más confiable (era la que resolvía la foto 16 sin vaciarse). Paracambiar a v2: poné "variant": "v2_antiloop" en config.json, o usá la opción 7 del menú.
 
-¿Querés que deje v2_antiloop como default, o lo dejo en v1_original? Aparte: mpts están en español — quedó desactualizado con este cambio a inglés; ¿loactualizo?
+
+que este la mejor config y la actual, y una manera de pasar la actual a la mejor, luego de pruebas y tocar cosas, y tambien una manera de guardar la mejor si hay una mejor
+
+pasar todo a ingles
+
+intentar que no piense
