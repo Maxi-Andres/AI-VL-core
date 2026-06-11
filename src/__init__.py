@@ -1,1 +1,1 @@
-"""Núcleo del PoC de VLM (cliente Ollama, prompts, parseo, config)."""
+"""Core of the PoC: VLM path (Ollama client, prompts, parsing, config) + YOLO path (Ultralytics)."""

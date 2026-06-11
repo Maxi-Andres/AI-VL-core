@@ -1,3 +1,7 @@
+para poder usar yolo
+source ".venv/bin/activate   # la consola va a mostrar (.venv)
+deactivate                   # salis de el venv
+
 - intentar evitar que el modelo piense, quiza fijate otra version o en hugging face, el │ qwen3-vl:4b │ piensa siempre aunque lo saques
 - proba con ollama en consola de una si te permite sacar el think NO, piensa igual siempre se necesita el modelo no think
 
@@ -16,6 +20,7 @@ el tiempo desde que toco enter hasta que veo como imprime lo que piensa y tambie
 DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre ellos si no no se puede comparar, y que en estos ademas de lo que se guarda tambien se guarden los jsons de cada imagen que detectan para poder ver que pusieron, verificar tambien que la ia no lea los nombres de las imagenes, eso es trampa
 
 - hace un front real para no usar mas la consola fijate si podes hacer que python sea el back end
+- poner una base de datos para que la ia pueda tener mas contexto o cosas para las prompts
 
 - !FIJATE de provar que onda YOLOv8 o v11 quiza son mas rapidos o podes usar eso para hacer rapido y despues los vl para el movimiento de el robot y las respuestas a comandos de voz
 

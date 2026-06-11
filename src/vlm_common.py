@@ -8,7 +8,7 @@ This is the single place (to avoid duplication) that holds:
   - Robust JSON parsing + bounding box normalization
   - The persistent config in config.json
 
-It does not run on its own; it is imported by menu.py / src/smoke_test.py / src/benchmark.py.
+It does not run on its own; it is imported by menu.py / src/vlm_smoke_test.py / src/vlm_benchmark.py (and indirectly by the yolo_* scripts via shared helpers).
 
 Why the native endpoint and not the OpenAI-compatible one?
 ---------------------------------------------------------------------------
@@ -253,7 +253,7 @@ _ALL_DEFAULT = {
 }
 
 # Variant registry by scope. Add as many as you want and compare with
-# `python3 src/benchmark.py --variants <a> <b>` (or from the benchmark submenu).
+# `python3 src/vlm_benchmark.py --variants <a> <b>` (or from the benchmark submenu).
 PROMPT_VARIANTS = {
     "industrial": {
         "v1_original": _INDUSTRIAL_V1,

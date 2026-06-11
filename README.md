@@ -8,24 +8,59 @@ VLM of the PoC (F1.8 criteria) and the VLM→VLA contract.
 
 ```
 .
-├── menu.py            # main entry point (interactive menu)
-├── src/               # source code
-│   ├── vlm_common.py  # core: prompts, Ollama client, parsing, config
-│   ├── smoke_test.py  # 1-image smoke test (CLI)
-│   └── benchmark.py   # latency/JSON benchmark + prompt A/B (CLI)
-├── fotos/             # image folders
-│   ├── clean/         # lab test set
-│   └── ciudad/        # additional set
-├── results/           # benchmark output (JSON)
-├── config.json        # persistent configuration (created on its own)
+├── menu.py                # main entry point (asks VLM vs YOLO, then a menu)
+├── src/                   # source code (VLM and YOLO paths, side by side)
+│   ├── vlm_common.py      # VLM core: prompts, Ollama client, parsing, config
+│   ├── vlm_scan.py        # VLM 1-image scan (CLI)
+│   ├── vlm_benchmark.py   # VLM latency/JSON benchmark + prompt A/B (CLI)
+│   ├── yolo_common.py     # YOLO core: ultralytics loader, detection, config
+│   ├── yolo_scan.py       # YOLO 1-image scan (CLI; saves the boxed image)
+│   └── yolo_benchmark.py  # YOLO latency benchmark (models × imgsz × conf)
+├── fotos/                 # image folders
+│   ├── clean/             # lab test set
+│   └── ciudad/            # additional set
+├── results/               # benchmark output (JSON)
+├── config.json            # persistent configuration (created on its own)
 └── requirements.txt
 ```
 
-## Requirements
+Two detection paths share one `config.json` and one `results/` folder:
+
+- **VLM** (`vlm_*`): the Ollama vision-language model — open-vocabulary, reasons
+  over a prompt, slower. Picks the primary VLM (F1.8 criteria).
+- **YOLO** (`yolo_*`): an in-process Ultralytics detector — what the real
+  deployment runs on the **live video stream** (here: single images only; video
+  needs a WebSocket + front/back-end, out of scope). Same JSON contract as the
+  VLM. Weights (`*.pt`) auto-download on first use and are git-ignored.
+  **Full YOLO guide** (usage, tuning variables, training, model differences):
+  [`docs/YOLO.md`](docs/YOLO.md).
+
+## Setup (clone & run)
+
+After `git clone`, run the setup script once — it creates an isolated virtual
+environment (`.venv/`) and installs everything. It does **not** touch the system
+Python (which on many distros, including this one with Python 3.14, is
+"externally-managed" and rejects `pip install`).
 
 ```bash
-pip install -r requirements.txt    # (only requests)
+git clone <repo> && cd "VL test"
+./setup.sh                 # creates .venv/ and installs requirements
+source .venv/bin/activate  # then use plain `python` / `yolo`
+python menu.py
 ```
+
+The `.venv/` folder is **git-ignored on purpose** (it's machine-specific — compiled
+binaries, absolute paths, ~GB). It is **not** in the repo; `./setup.sh` rebuilds it
+from `requirements.txt` on any machine, so a fresh clone always works. `setup.sh`
+even handles platforms whose `venv` lacks `ensurepip` (it bootstraps `pip` via
+`get-pip.py`, no sudo/apt needed).
+
+> Manual alternative (if you prefer): `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
+
+### Requirements
+
+- The **YOLO path** needs `ultralytics` (pulls in torch/opencv); the VLM path does
+  not. If you only use the VLM, `requests` alone is enough.
 
 - **Ollama** running at `http://localhost:11434` with the models downloaded
   (`ollama pull qwen3-vl:4b`, etc.).
@@ -62,7 +97,7 @@ ollama pull qwen3-vl:4b-instruct
 ```
 
 To compare thinking vs not-thinking within the same family, run the benchmark with
-both: `python3 src/benchmark.py fotos/clean --models qwen3-vl:4b-instruct qwen3-vl:4b-thinking`.
+both: `python3 src/vlm_benchmark.py fotos/clean --models qwen3-vl:4b-instruct qwen3-vl:4b-thinking`.
 
 ## Quick start: the menu (without typing commands)
 
@@ -72,7 +107,7 @@ python3 menu.py        # or just hit Play on the file in the IDE
 
 The menu has two ways to analyze:
 
-1. **Smoke test** (option 1): one image, prints the reasoning live + JSON.
+1. **Scan** (option 1): one image, prints the reasoning live + JSON.
 2. **Benchmark** (option 2): opens a **submenu** where you choose **which images**
    (which ones and how many), **which models**, **which prompts** (one or several variants),
    how many **runs**, and **one or several** values of `max_tokens`, `num_ctx` and `think`.
@@ -84,8 +119,8 @@ The menu has two ways to analyze:
 
 **Everything you choose is saved to `config.json`**, so next time it starts
 with whatever you last used. The benchmark has its **own** config (the
-`benchmark_*` keys), independent of the smoke test: you can run the benchmark with a
-lighter context (faster) without lowering the smoke test's context.
+`benchmark_*` keys), independent of the scan: you can run the benchmark with a
+lighter context (faster) without lowering the scan's context.
 
 ---
 
@@ -94,18 +129,18 @@ lighter context (faster) without lowering the smoke test's context.
 Both scripts take their **defaults from `config.json`**; any flag overrides that
 default only for that run (it doesn't modify the file).
 
-### Smoke test — one image
+### Scan — one image
 
 ```bash
-python3 src/smoke_test.py                          # uses everything from config.json
-python3 src/smoke_test.py fotos/clean/5.jpeg        # another image
-python3 src/smoke_test.py fotos/clean/5.jpeg --model qwen3-vl:8b
-python3 src/smoke_test.py fotos/clean/5.jpeg --scope all
-python3 src/smoke_test.py fotos/clean/5.jpeg --max-tokens 8192 --num-ctx 16384
-python3 src/smoke_test.py fotos/clean/5.jpeg --no-think     # request think=false
+python3 src/vlm_scan.py                          # uses everything from config.json
+python3 src/vlm_scan.py fotos/clean/5.jpeg        # another image
+python3 src/vlm_scan.py fotos/clean/5.jpeg --model qwen3-vl:8b
+python3 src/vlm_scan.py fotos/clean/5.jpeg --scope all
+python3 src/vlm_scan.py fotos/clean/5.jpeg --max-tokens 8192 --num-ctx 16384
+python3 src/vlm_scan.py fotos/clean/5.jpeg --no-think     # request think=false
 ```
 
-The smoke test **prints live what the model is thinking** (in gray) and at the
+The scan **prints live what the model is thinking** (in gray) and at the
 end the JSON, the latency and the input/output tokens.
 
 | Flag            | Default (config.json) | What it does |
@@ -126,15 +161,15 @@ models, prompts, images, `max_tokens`, `num_ctx` and `think` — and each
 combination is a row of the report. All of them accept **several values**:
 
 ```bash
-python3 src/benchmark.py                                    # uses everything from config.json (benchmark_* keys)
-python3 src/benchmark.py fotos/clean --runs 5
-python3 src/benchmark.py fotos/clean --models qwen3-vl:4b qwen3-vl:8b      # several models
-python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop    # prompt A/B
-python3 src/benchmark.py fotos/clean --max-tokens 4096 8192                # compare output caps
-python3 src/benchmark.py fotos/clean --num-ctx 8192 16384                  # compare context windows
-python3 src/benchmark.py fotos/clean --think true false                    # compare with/without reasoning
-python3 src/benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg       # only those images
-python3 src/benchmark.py fotos/clean --scope all --runs 1
+python3 src/vlm_benchmark.py                                    # uses everything from config.json (benchmark_* keys)
+python3 src/vlm_benchmark.py fotos/clean --runs 5
+python3 src/vlm_benchmark.py fotos/clean --models qwen3-vl:4b qwen3-vl:8b      # several models
+python3 src/vlm_benchmark.py fotos/clean --variants v1_original v2_antiloop    # prompt A/B
+python3 src/vlm_benchmark.py fotos/clean --max-tokens 4096 8192                # compare output caps
+python3 src/vlm_benchmark.py fotos/clean --num-ctx 8192 16384                  # compare context windows
+python3 src/vlm_benchmark.py fotos/clean --think true false                    # compare with/without reasoning
+python3 src/vlm_benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg       # only those images
+python3 src/vlm_benchmark.py fotos/clean --scope all --runs 1
 ```
 
 > Beware the **combinatorial explosion**: the total number of calls is
@@ -170,7 +205,7 @@ aggregate numbers. The image **file names are never sent to the model** (only th
 bytes + the fixed prompt), so it can't "cheat" by reading the name.
 
 > **Context note (speed):** the benchmark starts with `num_ctx=8192` /
-> `max_tokens=4096` — **half** of what the smoke test uses (16384 / 8192).
+> `max_tokens=4096` — **half** of what the scan uses (16384 / 8192).
 > Less context = faster prefill (the image goes in at lower resolution). With
 > the `v2_antiloop` prompt this does **not** truncate: tested on images 1, 14 and 16
 > (including the one that previously ran out of context) → valid JSON and ~13–17 s.
@@ -180,7 +215,7 @@ bytes + the fixed prompt), so it can't "cheat" by reading the name.
 > **Comparing prompts (A/B):** the A/B of prompt variants **is no longer a separate
 > script** — it's inside the benchmark. Pass several with `--variants` (or pick them
 > in the submenu, option 5) and compare speed / JSON% / objects keeping everything
-> else constant. E.g.: `python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop`.
+> else constant. E.g.: `python3 src/vlm_benchmark.py fotos/clean --variants v1_original v2_antiloop`.
 
 ---
 
@@ -214,19 +249,19 @@ they are the VLM→VLA contract.
 | `all` | `default` | Single prompt for generic objects. |
 
 **How to swap them** (3 ways, no need to touch code except the last one):
-1. `config.json` → key `"variant"` (smoke) or `"benchmark_variants"` (benchmark).
-2. Flag `--variant v2_antiloop` in `src/smoke_test.py`, or `--variants v1_original v2_antiloop` in `src/benchmark.py` (overrides the config for that run).
+1. `config.json` → key `"variant"` (scan) or `"benchmark_variants"` (benchmark).
+2. Flag `--variant v2_antiloop` in `src/vlm_scan.py`, or `--variants v1_original v2_antiloop` in `src/vlm_benchmark.py` (overrides the config for that run).
 3. The **default active** variant is in `DEFAULT_VARIANT` (`src/vlm_common.py`); change it there if you want to move the global default.
 
 To **add** a new variant: add an entry to `PROMPT_VARIANTS["industrial"]`
-and compare with `python3 src/benchmark.py … --variants <old> <new>`.
+and compare with `python3 src/vlm_benchmark.py … --variants <old> <new>`.
 
 > **Measurement note:** in tests on images 1, 14 and 16, `v2_antiloop`
 > turned out **faster** than `v1_original` (e.g. on image 16: ~15 s vs ~97 s),
 > because cutting the category deliberation saves a lot of reasoning tokens.
 > The default active variant is `v1_original` (explicit request); change it to
 > `v2_antiloop` if you want the faster one. Reproduce with
-> `python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop`.
+> `python3 src/vlm_benchmark.py fotos/clean --variants v1_original v2_antiloop`.
 
 ## config.json
 
@@ -262,9 +297,9 @@ put a single element to not sweep that dimension, or several to compare them
 values from old configs (it wraps them in a list on its own).
 
 The `benchmark_*` keys are the benchmark's **own** config (independent
-of the smoke test). `benchmark_images: []` means **all** the images in the
+of the scan). `benchmark_images: []` means **all** the images in the
 folder (if you add photos, they're included automatically); put a list of names
-(`["1.jpeg", "16.jpeg"]`) to run only those. The smoke test (`max_tokens`,
+(`["1.jpeg", "16.jpeg"]`) to run only those. The scan (`max_tokens`,
 `num_ctx`, `scope`, `variant`) stays intact.
 
 ## Important notes
@@ -341,8 +376,11 @@ folder (if you add photos, they're included automatically); put a list of names
 | Path                  | What it is |
 |-----------------------|--------|
 | `menu.py`             | Interactive menu (main entry point). |
-| `src/smoke_test.py`   | Smoke test of 1 image (CLI). |
-| `src/benchmark.py`    | Latency/JSON benchmark + prompt A/B (CLI). |
+| `src/vlm_scan.py`   | VLM scan of 1 image (CLI). |
+| `src/vlm_benchmark.py`    | VLM latency/JSON benchmark + prompt A/B (CLI). |
+| `src/yolo_common.py`  | YOLO core: ultralytics loader, detection, config. |
+| `src/yolo_scan.py`  | YOLO scan of 1 image (CLI). |
+| `src/yolo_benchmark.py`   | YOLO latency benchmark (models × imgsz × conf). |
 | `src/vlm_common.py`   | Shared core: prompts (`PROMPT_VARIANTS`/`SCOPES`), Ollama client, config. |
 | `config.json`         | Persistent configuration (created on its own, at the root). |
 | `fotos/clean/`, `fotos/ciudad/` | Test images. |

@@ -1,1 +1,5 @@
 requests>=2.31
+
+# YOLO path only (vlm_common / the VLM path does NOT need this).
+# Pulls in torch + opencv; install it when you want to run the YOLO scripts/menu.
+ultralytics>=8.3

@@ -1,19 +1,27 @@
 #!/usr/bin/env python3
 """
-menu.py — Interactive menu for the VLM PoC.
+menu.py — Interactive menu for the PoC (VLM and YOLO).
 
-Run THIS file (IDE Play button or `python3 menu.py`) and choose everything from
-a menu. There are two ways to analyze:
+Run THIS file (IDE Play button or `python3 menu.py`). It first asks which path
+you want:
 
-  1) ANALYZE (smoke test): one image, prints the reasoning live + JSON.
-  2) BENCHMARK: opens a submenu where you choose WHICH images, WHICH models, how
-     many runs, which prompt and which context, and runs everything with a
-     progress bar and a timing report (per image, total, average, P50/P95) + % JSON.
+  - VLM  : the Ollama vision-language model (reasons over a prompt, returns JSON).
+  - YOLO : the Ultralytics detector that runs in-process (what the real
+           deployment runs on the live video stream).
 
-Choices are saved to config.json, so next time it starts with whatever you used
-last. To use it WITHOUT the menu (command line with flags), see README.md.
+Each path then offers the same two ways to analyze:
 
-Requirements:  pip install requests
+  1) SCAN: one image, prints the result + JSON (YOLO also saves the boxed image).
+  2) BENCHMARK: a submenu to choose WHICH images, WHICH models, how many runs,
+     and the per-path knobs (VLM: prompt/tokens/ctx/think; YOLO: imgsz/conf),
+     then runs the cartesian product with a progress bar and a timing report
+     (per image, total, average, P50/P95).
+
+Choices are saved to a single config.json (VLM keys + yolo_* keys), so next time
+it starts with whatever you used last. To use it WITHOUT the menu (command line
+with flags), see README.md.
+
+Requirements:  pip install requests   (YOLO path also: pip install ultralytics)
 """
 import os
 import sys
@@ -28,12 +36,22 @@ from vlm_common import (
     PROMPT_VARIANTS,
     SCOPES,
     list_images,
-    load_config,
     model_supports_thinking,
     save_config,
 )
-from smoke_test import run_smoke
-from benchmark import run_benchmark
+# yolo_common.load_config is a superset of the VLM one: it loads the shared
+# config.json AND fills in the YOLO-only defaults, so the single menu can drive
+# both paths off one config object.
+from yolo_common import (
+    KNOWN_MODELS,
+    list_models as list_yolo_models,
+    load_config,
+    ultralytics_available,
+)
+from vlm_scan import run_vlm_scan
+from vlm_benchmark import run_benchmark
+from yolo_scan import run_yolo_scan
+from yolo_benchmark import run_yolo_benchmark
 
 
 # --------------------------------------------------------------------------- #
@@ -266,7 +284,7 @@ def show_config(cfg):
     print("\n" + "=" * 52)
     print(" CURRENT CONFIG (config.json)")
     print("=" * 52)
-    print("  [Smoke test]")
+    print("  [Scan]")
     print(f"    Model            : {cfg['model']}")
     print(f"    Image            : {cfg['image']}")
     print(f"    Detection mode   : {cfg['scope']} ({SCOPES[cfg['scope']]['label']})")
@@ -434,13 +452,13 @@ def benchmark_menu(cfg):
 # --------------------------------------------------------------------------- #
 MENU = """
 ┌────────────────────────────────────────────────┐
-│             VLM PoC — Main menu                │
+│                VLM — menu                      │
 ├────────────────────────────────────────────────┤
 │  ANALYZE                                       │
-│   1) Smoke test (1 image, live reasoning)      │
+│   1) Scan (1 image, live reasoning)            │
 │   2) Benchmark (models × prompts, submenu)     │
 │                                                │
-│  CONFIGURE SMOKE TEST (saved to config)        │
+│  CONFIGURE SCAN (saved to config)              │
 │   3) Model                                     │
 │   4) Image                                     │
 │   5) Detection mode (industrial / all)         │
@@ -449,24 +467,23 @@ MENU = """
 │   8) max_tokens / num_ctx                      │
 │   9) Show current config                       │
 │                                                │
-│   0) Exit                                      │
+│   0) Back (path selection)                     │
 └────────────────────────────────────────────────┘"""
 
 
-def main():
-    cfg = load_config()
+def vlm_menu(cfg):
+    """Interactive menu for the VLM (Ollama) path."""
     show_config(cfg)
-
     while True:
         print(MENU)
         choice = ask("Option: ")
 
         if choice == "1":
             save_config(cfg)
-            run_smoke(cfg["image"], cfg["model"], scope=cfg["scope"],
-                      max_tokens=cfg["max_tokens"], think=cfg["think"],
-                      url=cfg["url"], num_ctx=cfg["num_ctx"],
-                      variant=cfg.get("variant"))
+            run_vlm_scan(cfg["image"], cfg["model"], scope=cfg["scope"],
+                         max_tokens=cfg["max_tokens"], think=cfg["think"],
+                         url=cfg["url"], num_ctx=cfg["num_ctx"],
+                         variant=cfg.get("variant"))
         elif choice == "2":
             benchmark_menu(cfg)
         elif choice == "3":
@@ -483,6 +500,266 @@ def main():
             set_ctx(cfg); save_config(cfg)
         elif choice == "9":
             show_config(cfg)
+        elif choice == "0" or choice.lower() in ("q", "back"):
+            save_config(cfg)
+            return
+        else:
+            print("[!] Invalid option.")
+
+
+# --------------------------------------------------------------------------- #
+# YOLO path: config actions + menus
+# --------------------------------------------------------------------------- #
+def float_list(raw):
+    """'0.25, 0.5' or '0.25 0.5' -> [0.25, 0.5]. [] if nothing is parseable."""
+    parts = raw.replace(",", " ").split()
+    out = []
+    for p in parts:
+        try:
+            out.append(float(p))
+        except ValueError:
+            pass
+    return out
+
+
+def yolo_pick_model(cfg):
+    models = list_yolo_models()
+    cfg["yolo_model"] = choose_from_list("YOLO weights (.pt)", models, cfg["yolo_model"])
+    print("  ℹ pretrained weights are auto-downloaded on first use. "
+          "Smaller (n < s < m < l < x) = faster, less accurate.")
+
+
+def yolo_pick_image(cfg):
+    folder = ask(f"Image folder (Enter = {cfg['yolo_folder']}): ") or cfg["yolo_folder"]
+    cfg["yolo_folder"] = folder
+    imgs = list_images(folder)
+    if not imgs:
+        print(f"[!] No images in {folder}. Type the path manually.")
+        cfg["yolo_image"] = ask(f"Image (current: {cfg['yolo_image']}): ") or cfg["yolo_image"]
+    else:
+        cfg["yolo_image"] = choose_from_list("Image", imgs, cfg["yolo_image"])
+
+
+def yolo_set_params(cfg):
+    print("\n  ── conf vs imgsz ───────────────────────────────────────────────")
+    print("  • conf  = confidence threshold; detections below it are dropped.")
+    print("            Lower = more (and more false) boxes; higher = stricter.")
+    print("  • imgsz = inference image size (longer side). Bigger = more detail")
+    print("            on small objects but slower. Common: 640, 1280.")
+    print("  ────────────────────────────────────────────────────────────────")
+    v = ask(f"conf (current: {cfg['yolo_conf']}, Enter = keep): ")
+    try:
+        if v != "":
+            cfg["yolo_conf"] = float(v)
+    except ValueError:
+        print("[!] Not a number, keeping the current one.")
+    s = ask(f"imgsz (current: {cfg['yolo_imgsz']}, Enter = keep): ")
+    if s.isdigit():
+        cfg["yolo_imgsz"] = int(s)
+
+
+def yolo_show_config(cfg):
+    print("\n" + "=" * 52)
+    print(" CURRENT YOLO CONFIG (config.json)")
+    print("=" * 52)
+    print("  [Scan]")
+    print(f"    Model            : {cfg['yolo_model']}")
+    print(f"    Image            : {cfg['yolo_image']}")
+    print(f"    conf / imgsz     : {cfg['yolo_conf']} / {cfg['yolo_imgsz']}")
+    print(f"    Save annotated   : {'ON' if cfg.get('yolo_save', True) else 'OFF'}")
+    print("  [Benchmark]")
+    n_img = cfg.get("yolo_benchmark_images") or "ALL"
+    print(f"    Folder           : {cfg['yolo_folder']}")
+    print(f"    Images           : {n_img}")
+    print(f"    Models           : {', '.join(cfg['yolo_benchmark_models'])}")
+    print(f"    Runs/image       : {cfg['yolo_benchmark_runs']}")
+    print(f"    conf (list)      : {as_list(cfg.get('yolo_benchmark_conf'))}")
+    print(f"    imgsz (list)     : {as_list(cfg.get('yolo_benchmark_imgsz'))}")
+    print("=" * 52)
+
+
+def yolo_bench_pick_images(cfg):
+    folder = ask(f"Image folder (Enter = {cfg['yolo_folder']}): ") or cfg["yolo_folder"]
+    cfg["yolo_folder"] = folder
+    imgs = list_images(folder)
+    if not imgs:
+        print(f"[!] No images in {folder}.")
+        return
+    names = [os.path.basename(p) for p in imgs]
+    current = cfg.get("yolo_benchmark_images") or names
+    chosen = choose_multi(f"Benchmark images in '{folder}'", names, current)
+    cfg["yolo_benchmark_images"] = [] if set(chosen) == set(names) else chosen
+    sel = cfg["yolo_benchmark_images"] or names
+    print(f"-> {len(sel)} image(s) selected.")
+
+
+def yolo_bench_pick_models(cfg):
+    models = list_yolo_models()
+    chosen = choose_multi("YOLO models to compare", models, cfg["yolo_benchmark_models"])
+    if chosen:
+        cfg["yolo_benchmark_models"] = chosen
+
+
+def yolo_bench_set_runs(cfg):
+    runs = ask(f"Runs per image (current: {cfg['yolo_benchmark_runs']}): ")
+    if runs.isdigit() and int(runs) >= 1:
+        cfg["yolo_benchmark_runs"] = int(runs)
+
+
+def yolo_bench_set_params(cfg):
+    print("  (you can enter SEVERAL values separated by comma/space to compare them)")
+    vals = float_list(ask(f"conf to compare (current: {cfg.get('yolo_benchmark_conf')}, Enter = keep): "))
+    if vals:
+        cfg["yolo_benchmark_conf"] = vals
+    vals = int_list(ask(f"imgsz to compare (current: {cfg.get('yolo_benchmark_imgsz')}, Enter = keep): "))
+    if vals:
+        cfg["yolo_benchmark_imgsz"] = vals
+
+
+def yolo_bench_run(cfg):
+    all_imgs = list_images(cfg["yolo_folder"])
+    if not all_imgs:
+        print(f"[!] No images in {cfg['yolo_folder']}.")
+        return
+    sel = set(cfg.get("yolo_benchmark_images") or [])
+    images = [p for p in all_imgs if os.path.basename(p) in sel] if sel else all_imgs
+    run_yolo_benchmark(images, cfg["yolo_benchmark_models"],
+                       runs=cfg["yolo_benchmark_runs"],
+                       conf=cfg.get("yolo_benchmark_conf", [0.25]),
+                       imgsz=cfg.get("yolo_benchmark_imgsz", [640]))
+
+
+YOLO_BENCH_MENU = """
+┌────────────────────────────────────────────────┐
+│           YOLO BENCHMARK — configure           │
+├────────────────────────────────────────────────┤
+│   1) Choose images (which / how many)          │
+│   2) Choose models                             │
+│   3) Runs per image                            │
+│   4) conf / imgsz (1 or several each)          │
+│                                                │
+│   5) ▶ RUN BENCHMARK                           │
+│   0) Back to YOLO menu                         │
+└────────────────────────────────────────────────┘"""
+
+
+def yolo_benchmark_menu(cfg):
+    while True:
+        all_imgs = list_images(cfg["yolo_folder"])
+        n_img = len(cfg.get("yolo_benchmark_images") or all_imgs)
+        runs = cfg["yolo_benchmark_runs"]
+        n_models = len(cfg["yolo_benchmark_models"])
+        cf = as_list(cfg.get("yolo_benchmark_conf"))
+        sz = as_list(cfg.get("yolo_benchmark_imgsz"))
+        n_combo = n_models * len(cf) * len(sz)
+        n_calls = n_img * runs * n_combo
+        print(f"\n  >> {n_img} img × {runs} runs × {n_combo} combos "
+              f"({n_models} mod × {len(sz)} imgsz × {len(cf)} conf) = {n_calls} calls")
+        print(f"     imgsz={sz} | conf={cf}")
+        print(YOLO_BENCH_MENU)
+        choice = ask("Option: ")
+        if choice == "1":
+            yolo_bench_pick_images(cfg); save_config(cfg)
+        elif choice == "2":
+            yolo_bench_pick_models(cfg); save_config(cfg)
+        elif choice == "3":
+            yolo_bench_set_runs(cfg); save_config(cfg)
+        elif choice == "4":
+            yolo_bench_set_params(cfg); save_config(cfg)
+        elif choice == "5":
+            save_config(cfg)
+            yolo_bench_run(cfg)
+        elif choice == "0" or choice.lower() in ("q", "back"):
+            return
+        else:
+            print("[!] Invalid option.")
+
+
+YOLO_MENU = """
+┌────────────────────────────────────────────────┐
+│                YOLO — menu                     │
+├────────────────────────────────────────────────┤
+│  ANALYZE                                       │
+│   1) Scan (1 image, boxes + JSON)              │
+│   2) Benchmark (models × imgsz × conf, submenu)│
+│                                                │
+│  CONFIGURE SCAN (saved to config)              │
+│   3) Model (weights .pt)                       │
+│   4) Image                                     │
+│   5) conf / imgsz                              │
+│   6) Save annotated image (ON/OFF)             │
+│   7) Show current config                       │
+│                                                │
+│   0) Back (path selection)                     │
+└────────────────────────────────────────────────┘"""
+
+
+def yolo_toggle_save(cfg):
+    cfg["yolo_save"] = not cfg.get("yolo_save", True)
+    state = "ON" if cfg["yolo_save"] else "OFF"
+    print(f"-> Save annotated (boxed) image on a scan: {state}.")
+    if cfg["yolo_save"]:
+        print("   Annotated images go to results/annotated/<image>__<model>.jpg")
+
+
+def yolo_menu(cfg):
+    """Interactive menu for the YOLO (Ultralytics) path."""
+    if not ultralytics_available():
+        print("\n[!] The 'ultralytics' package is not installed, so the YOLO path "
+              "cannot run yet.\n    Install it with:  pip install ultralytics")
+        print("    (You can still browse/configure this menu; runs will report the error.)")
+    yolo_show_config(cfg)
+    while True:
+        print(YOLO_MENU)
+        choice = ask("Option: ")
+        if choice == "1":
+            save_config(cfg)
+            run_yolo_scan(cfg["yolo_image"], cfg["yolo_model"],
+                          conf=cfg["yolo_conf"], imgsz=cfg["yolo_imgsz"],
+                          save=cfg.get("yolo_save", True))
+        elif choice == "2":
+            yolo_benchmark_menu(cfg)
+        elif choice == "3":
+            yolo_pick_model(cfg); save_config(cfg)
+        elif choice == "4":
+            yolo_pick_image(cfg); save_config(cfg)
+        elif choice == "5":
+            yolo_set_params(cfg); save_config(cfg)
+        elif choice == "6":
+            yolo_toggle_save(cfg); save_config(cfg)
+        elif choice == "7":
+            yolo_show_config(cfg)
+        elif choice == "0" or choice.lower() in ("q", "back"):
+            save_config(cfg)
+            return
+        else:
+            print("[!] Invalid option.")
+
+
+# --------------------------------------------------------------------------- #
+# Top-level path selection (VLM vs YOLO)
+# --------------------------------------------------------------------------- #
+PATH_MENU = """
+╔════════════════════════════════════════════════╗
+║              PoC — choose a path               ║
+╠════════════════════════════════════════════════╣
+║   1) VLM  (Ollama vision-language model)        ║
+║   2) YOLO (Ultralytics detector, in-process)    ║
+║                                                ║
+║   0) Exit                                      ║
+╚════════════════════════════════════════════════╝"""
+
+
+def main():
+    cfg = load_config()
+
+    while True:
+        print(PATH_MENU)
+        choice = ask("Path: ")
+        if choice == "1":
+            vlm_menu(cfg)
+        elif choice == "2":
+            yolo_menu(cfg)
         elif choice == "0" or choice.lower() in ("q", "exit"):
             save_config(cfg)
             print("Config saved. Bye!")

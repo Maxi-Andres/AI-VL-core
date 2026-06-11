@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-benchmark.py — Latency benchmark (P50/P95), valid-JSON rate and prompt A/B testing.
+vlm_benchmark.py — Latency benchmark (P50/P95), valid-JSON rate and prompt A/B testing.
 
 Runs the SAME set of images, N times per image, sweeping the product
 MODELS × PROMPT VARIANTS. It serves two purposes at once:
@@ -24,13 +24,16 @@ Results are saved to results/ (not loose in the project root).
 Don't want to type flags? Run `python3 menu.py` -> option 2 (Benchmark),
 which opens a submenu to choose images, models, prompts, runs and context.
 
+This is the VLM counterpart of yolo_benchmark.py (the YOLO version sweeps
+models × imgsz × conf instead of models × prompts × tokens).
+
 Requirements:  pip install requests
 Usage:
-    python3 src/benchmark.py fotos/clean --runs 3
-    python3 src/benchmark.py fotos/clean --models qwen3-vl:8b qwen3-vl:4b
-    python3 src/benchmark.py fotos/clean --variants v1_original v2_antiloop
-    python3 src/benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg
-    python3 src/benchmark.py fotos/clean --scope all
+    python3 src/vlm_benchmark.py fotos/clean --runs 3
+    python3 src/vlm_benchmark.py fotos/clean --models qwen3-vl:8b qwen3-vl:4b
+    python3 src/vlm_benchmark.py fotos/clean --variants v1_original v2_antiloop
+    python3 src/vlm_benchmark.py fotos/clean --images 1.jpeg 14.jpeg 16.jpeg
+    python3 src/vlm_benchmark.py fotos/clean --scope all
 """
 import argparse
 import json

@@ -5,5 +5,11 @@ __pycache__/
 .venv/
 venv/
 
-# Resultados de benchmarks (se regeneran; se versiona solo la carpeta)
+# Benchmark results (regenerated; only the folder is versioned)
 results/*.json
+
+# Annotated (boxed) images saved by the YOLO scan
+results/annotated/
+
+# YOLO weights (auto-downloaded by ultralytics on first use)
+*.pt
