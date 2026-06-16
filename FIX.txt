@@ -37,6 +37,25 @@ DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre
 
 ------------------------------------------------------------------------------------------------------------------------------------------------
 
+=====================================================================================
+Model        imgsz  conf     P50     P95    Mean     Min     Max    Total  ~obj  Errs
+-------------------------------------------------------------------------------------
+yolov8n.pt     640  0.25    15ms    15ms    15ms    15ms    15ms     15ms  10.0     0
+yolov8s.pt     640  0.25    15ms    15ms    15ms    15ms    15ms     15ms  17.0     0
+yolo11n.pt     640  0.25    15ms    15ms    15ms    15ms    15ms     15ms  16.0     0
+yolo11s.pt     640  0.25    16ms    16ms    16ms    16ms    16ms     16ms  20.0     0
+yolo11m.pt     640  0.25    18ms    18ms    18ms    18ms    18ms     18ms  14.0     0
+yolo11l.pt     640  0.25    20ms    20ms    20ms    20ms    20ms     20ms  17.0     0
+yolo11x.pt     640  0.25    23ms    23ms    23ms    23ms    23ms     23ms  17.0     0
+yolov8m.pt     640  0.25    18ms    18ms    18ms    18ms    18ms     18ms  20.0     0
+yolov8l.pt     640  0.25    22ms    22ms    22ms    22ms    22ms     22ms  19.0     0
+yolov8x.pt     640  0.25    25ms    25ms    25ms    25ms    25ms     25ms  20.0     0
+=====================================================================================
+MAS DETECCIONES NO SIGNIFICA MEJOR, PUEDE DAR FALSOS POSITIVOS
+fijate las fotos pero para mi esta buena yolo11s, lo que no probe es cambiar el tamaño de la imagen, mas grande peor pero mas preciso
+las clases de COCO no afectan a la velocidad por que hace single-shot
+------------------------------------------------------------------------------------------------------------------------------------------------
+
 - Caché de Ollama: la 1ª vez que ve una imagen hace el prefill completo (~9s); si repetís la misma imagen (o ya la vio en un combo anterior), devuelve un cache-hit en ~1s. Los "1s" que vi al principio eran imágenes ya cacheadas, no nuevas.
 - Recarga del modelo: cada vez que cambia num_ctx, Ollama recarga el modelo (~10s), y ese costo caía sobre la 1ª llamada de cada combo, inflando las mediciones.
 

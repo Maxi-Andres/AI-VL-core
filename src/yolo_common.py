@@ -31,6 +31,7 @@ half of the project keeps working even when ultralytics is not installed.
 """
 import os
 import time
+from datetime import datetime
 
 # Reuse everything path/config/UI-related from the VLM core so there is a single
 # config.json, a single results/ folder and identical progress bars/timers.
@@ -101,6 +102,59 @@ KNOWN_MODELS = [
     # YOLOv10
     "yolov10n.pt", "yolov10s.pt", "yolov10m.pt",
 ]
+
+# The 80 COCO classes, in the canonical id order every pretrained YOLO uses. This
+# is only a FALLBACK so the menu can list/pick classes without loading a model
+# (or when ultralytics is not installed). The authoritative list is the loaded
+# model's own `.names` (a custom-trained `.pt` may have different classes), which
+# `class_names()` reads when it can.
+COCO_CLASSES = [
+    "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train",
+    "truck", "boat", "traffic light", "fire hydrant", "stop sign",
+    "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag",
+    "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite",
+    "baseball bat", "baseball glove", "skateboard", "surfboard", "tennis racket",
+    "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana",
+    "apple", "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza",
+    "donut", "cake", "chair", "couch", "potted plant", "bed", "dining table",
+    "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
+    "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock",
+    "vase", "scissors", "teddy bear", "hair drier", "toothbrush",
+]
+
+
+def class_names(model_name):
+    """Return the ordered list of class names a model can detect.
+
+    Reads the loaded model's own `.names` (authoritative — works for custom
+    weights too). Falls back to the 80 COCO classes if the model can't be loaded
+    (e.g. ultralytics not installed, or no network for the first download), so the
+    menu can still offer a class filter to configure.
+    """
+    try:
+        model = load_model(model_name)
+        names = model.names or {}
+        if names:
+            return [names[k] for k in sorted(names)]
+    except Exception:
+        pass
+    return list(COCO_CLASSES)
+
+
+def resolve_class_ids(model, classes):
+    """Map a list of class NAMES to the model's class IDS for `predict(classes=)`.
+
+    `classes` None/empty -> None (no filter, detect everything). Names not present
+    in the model are silently skipped; if nothing matches, returns None (rather
+    than an empty filter that would detect nothing).
+    """
+    if not classes:
+        return None
+    names = getattr(model, "names", None) or {}
+    name_to_id = {v: k for k, v in names.items()}
+    ids = [name_to_id[c] for c in classes if c in name_to_id]
+    return ids or None
 
 
 def list_models(extra_dirs=None):
@@ -185,10 +239,17 @@ def annotated_dir():
 
 
 def default_annotated_path(image_path, model_name):
-    """Build a stable output path for the annotated image: <image>__<model>.jpg."""
+    """Build a NON-colliding output path for the annotated image.
+
+    Name is `<image>__<model>__<timestamp>.jpg`. The timestamp (down to the
+    microsecond) makes every scan unique, so repeated scans of the same
+    image+model — including with a different class filter — never overwrite each
+    other.
+    """
     base = os.path.splitext(os.path.basename(image_path))[0]
     model_tag = os.path.splitext(os.path.basename(model_name))[0]
-    return os.path.join(annotated_dir(), f"{base}__{model_tag}.jpg")
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return os.path.join(annotated_dir(), f"{base}__{model_tag}__{stamp}.jpg")
 
 
 def save_annotated(result, out_path):
@@ -210,7 +271,7 @@ def save_annotated(result, out_path):
 
 
 def run_detection(model_name, image_path, conf=0.25, imgsz=640, device=None,
-                  warmup=False, annotate_path=None):
+                  warmup=False, annotate_path=None, classes=None):
     """Run YOLO on a single image and return a dict mirroring vlm_common.query_vlm.
 
     `conf`   : confidence threshold (drop detections below it).
@@ -221,18 +282,22 @@ def run_detection(model_name, image_path, conf=0.25, imgsz=640, device=None,
     `annotate_path` : if set, also save a copy of the image with the detected
                boxes drawn on it (so you can eyeball whether YOLO "hit"); the
                saved path is returned in res["annotated"].
+    `classes` : list of class NAMES to keep (e.g. ["person", "cup"]); None/empty
+               means no filter (detect everything). Names absent from the model
+               are ignored.
 
     Returns: elapsed (wall seconds), objects, parsed ({"objects": [...]}), ok,
     n (object count), `speed` (ultralytics' per-stage ms) and `annotated` (path or
     None). Raises on a genuine inference error (caller handles it).
     """
     model = load_model(model_name)
+    class_ids = resolve_class_ids(model, classes)
     if warmup:
         model.predict(source=image_path, conf=conf, imgsz=imgsz, device=device,
-                      verbose=False)
+                      classes=class_ids, verbose=False)
     t0 = time.perf_counter()
     results = model.predict(source=image_path, conf=conf, imgsz=imgsz,
-                            device=device, verbose=False)
+                            device=device, classes=class_ids, verbose=False)
     elapsed = time.perf_counter() - t0
 
     result = results[0]
@@ -286,6 +351,7 @@ YOLO_DEFAULT_CONFIG = {
     "yolo_conf": 0.25,                 # confidence threshold (single-image scan)
     "yolo_imgsz": 640,                 # inference image size (single-image scan)
     "yolo_save": True,                 # save the annotated (boxed) image on a scan
+    "yolo_classes": [],                # class NAMES to keep ([] = ALL, no filter)
 
     # --- YOLO benchmark: its own block, conf/imgsz swept as LISTS -------------
     "yolo_benchmark_models": ["yolov8n.pt", "yolov8s.pt"],

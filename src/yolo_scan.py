@@ -34,11 +34,12 @@ from yolo_common import (
 
 
 def run_yolo_scan(image, model, conf=0.25, imgsz=640, device=None, save=True,
-                  save_path=None):
+                  save_path=None, classes=None):
     """Run a YOLO scan on a single image and print the result.
 
     If `save` is True, the annotated (boxed) image is written to `save_path`
-    (default: results/annotated/<image>__<model>.jpg). Returns True on success,
+    (default: results/annotated/<image>__<model>.jpg). `classes` is a list of
+    class NAMES to keep (None/empty = detect everything). Returns True on success,
     False on a handled error (missing image / missing ultralytics / inference).
     """
     if not os.path.exists(image):
@@ -49,11 +50,12 @@ def run_yolo_scan(image, model, conf=0.25, imgsz=640, device=None, save=True,
     if save:
         annotate_path = save_path or default_annotated_path(image, model)
 
+    filt = ", ".join(classes) if classes else "ALL classes"
     print(f"[..] Running YOLO '{model}' on '{image}' "
-          f"(conf={conf}, imgsz={imgsz}) ...")
+          f"(conf={conf}, imgsz={imgsz}, filter={filt}) ...")
     try:
         res = run_detection(model, image, conf=conf, imgsz=imgsz, device=device,
-                            annotate_path=annotate_path)
+                            annotate_path=annotate_path, classes=classes)
     except ImportError as e:
         print(f"[ERROR] {e}", file=sys.stderr)
         return False
@@ -79,6 +81,10 @@ def main():
                     help="Inference image size (longer side); bigger = more detail, slower")
     ap.add_argument("--device", default=None,
                     help="Force device (e.g. 'cpu', '0'). Default: ultralytics auto-picks.")
+    ap.add_argument("--classes", nargs="+", default=cfg.get("yolo_classes") or None,
+                    metavar="NAME",
+                    help="Only detect these class names (e.g. --classes person cup). "
+                         "Omit = detect all classes.")
     ap.add_argument("--save", dest="save", action="store_true",
                     default=cfg.get("yolo_save", True),
                     help="Save the annotated (boxed) image (default ON)")
@@ -90,7 +96,8 @@ def main():
     args = ap.parse_args()
 
     ok = run_yolo_scan(args.image, args.model, conf=args.conf, imgsz=args.imgsz,
-                       device=args.device, save=args.save, save_path=args.save_path)
+                       device=args.device, save=args.save, save_path=args.save_path,
+                       classes=args.classes)
     sys.exit(0 if ok else 1)
 
 

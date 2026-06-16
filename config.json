@@ -37,27 +37,26 @@
   "benchmark_think": [
     false
   ],
-  "yolo_model": "yolov8n.pt",
-  "yolo_image": "fotos/clean/2.jpeg",
-  "yolo_folder": "fotos/clean",
+  "yolo_model": "yolo11s.pt",
+  "yolo_image": "fotos/ciudad/101.jpeg",
+  "yolo_folder": "fotos/ciudad",
   "yolo_conf": 0.25,
   "yolo_imgsz": 640,
   "yolo_benchmark_models": [
     "yolov8n.pt",
-    "yolov8s.pt"
+    "yolov8s.pt",
+    "yolo11n.pt",
+    "yolo11s.pt",
+    "yolo11m.pt",
+    "yolo11l.pt",
+    "yolo11x.pt",
+    "yolov8m.pt",
+    "yolov8l.pt",
+    "yolov8x.pt"
   ],
   "yolo_benchmark_runs": 1,
   "yolo_benchmark_images": [
-    "1.jpeg",
-    "2.jpeg",
-    "3.jpeg",
-    "4.jpeg",
-    "5.jpeg",
-    "6.jpeg",
-    "7.jpeg",
-    "8.jpeg",
-    "9.jpeg",
-    "10.jpeg"
+    "101.jpeg"
   ],
   "yolo_benchmark_conf": [
     0.25
@@ -65,5 +64,8 @@
   "yolo_benchmark_imgsz": [
     640
   ],
-  "yolo_save": true
+  "yolo_save": true,
+  "yolo_classes": [
+    "person"
+  ]
 }

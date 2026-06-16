@@ -44,6 +44,7 @@ from vlm_common import (
 # both paths off one config object.
 from yolo_common import (
     KNOWN_MODELS,
+    class_names as yolo_class_names,
     list_models as list_yolo_models,
     load_config,
     ultralytics_available,
@@ -558,6 +559,33 @@ def yolo_set_params(cfg):
         cfg["yolo_imgsz"] = int(s)
 
 
+def yolo_pick_classes(cfg):
+    """Choose WHICH classes YOLO should keep. Empty selection = all (no filter).
+
+    The class list comes from the selected model's own labels (the 80 COCO classes
+    for the pretrained weights, or whatever a custom `.pt` defines). Items marked
+    with `*` are the current selection; you add/remove with the same numbered
+    multi-select used everywhere else ('all'/'none' clear the filter).
+    """
+    options = yolo_class_names(cfg["yolo_model"])
+    if not options:
+        print("[!] Could not read the class list for this model.")
+        return
+    print(f"\n  ℹ Classes come from the model '{cfg['yolo_model']}' ({len(options)} classes). "
+          "Pick which to DETECT; 'all'/'none' = no filter (detect everything).")
+    current = [c for c in cfg.get("yolo_classes", []) if c in options]
+    # When nothing is filtered yet, pre-mark everything so the listing reflects
+    # the real behaviour ("all are detected"); selecting a subset starts filtering.
+    chosen = choose_multi("Classes to detect", options, current or options)
+    # If everything ends up selected, store [] (= ALL / no filter, model-agnostic).
+    cfg["yolo_classes"] = [] if set(chosen) == set(options) else chosen
+    if cfg["yolo_classes"]:
+        print(f"-> Filtering to {len(cfg['yolo_classes'])} class(es): "
+              f"{', '.join(cfg['yolo_classes'])}")
+    else:
+        print("-> No filter: detecting ALL classes.")
+
+
 def yolo_show_config(cfg):
     print("\n" + "=" * 52)
     print(" CURRENT YOLO CONFIG (config.json)")
@@ -566,6 +594,8 @@ def yolo_show_config(cfg):
     print(f"    Model            : {cfg['yolo_model']}")
     print(f"    Image            : {cfg['yolo_image']}")
     print(f"    conf / imgsz     : {cfg['yolo_conf']} / {cfg['yolo_imgsz']}")
+    classes = cfg.get("yolo_classes") or []
+    print(f"    Classes filter   : {', '.join(classes) if classes else 'ALL (no filter)'}")
     print(f"    Save annotated   : {'ON' if cfg.get('yolo_save', True) else 'OFF'}")
     print("  [Benchmark]")
     n_img = cfg.get("yolo_benchmark_images") or "ALL"
@@ -687,8 +717,9 @@ YOLO_MENU = """
 │   3) Model (weights .pt)                       │
 │   4) Image                                     │
 │   5) conf / imgsz                              │
-│   6) Save annotated image (ON/OFF)             │
-│   7) Show current config                       │
+│   6) Filter classes (which to detect)          │
+│   7) Save annotated image (ON/OFF)             │
+│   8) Show current config                       │
 │                                                │
 │   0) Back (path selection)                     │
 └────────────────────────────────────────────────┘"""
@@ -716,7 +747,8 @@ def yolo_menu(cfg):
             save_config(cfg)
             run_yolo_scan(cfg["yolo_image"], cfg["yolo_model"],
                           conf=cfg["yolo_conf"], imgsz=cfg["yolo_imgsz"],
-                          save=cfg.get("yolo_save", True))
+                          save=cfg.get("yolo_save", True),
+                          classes=cfg.get("yolo_classes") or None)
         elif choice == "2":
             yolo_benchmark_menu(cfg)
         elif choice == "3":
@@ -726,8 +758,10 @@ def yolo_menu(cfg):
         elif choice == "5":
             yolo_set_params(cfg); save_config(cfg)
         elif choice == "6":
-            yolo_toggle_save(cfg); save_config(cfg)
+            yolo_pick_classes(cfg); save_config(cfg)
         elif choice == "7":
+            yolo_toggle_save(cfg); save_config(cfg)
+        elif choice == "8":
             yolo_show_config(cfg)
         elif choice == "0" or choice.lower() in ("q", "back"):
             save_config(cfg)
