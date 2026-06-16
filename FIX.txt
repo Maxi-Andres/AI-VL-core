@@ -2,6 +2,10 @@ para poder usar yolo
 source ".venv/bin/activate   # la consola va a mostrar (.venv)
 deactivate                   # salis de el venv
 
+- !IMPORTANTE para la foto de las chicas tenes que poner esto, si no se queda sin contexto y no da output, pero tarda mucho (30segs) para mi va a haber que hacer muchos modelos uno para personas por ejemplo, uno para objetos, quiza que lo identifique con el prompt de voz que le das que ahi elija cual usar 
+  "max_tokens": 2048,
+  "num_ctx": 8192,
+
 - intentar evitar que el modelo piense, quiza fijate otra version o en hugging face, el │ qwen3-vl:4b │ piensa siempre aunque lo saques
 - proba con ollama en consola de una si te permite sacar el think NO, piensa igual siempre se necesita el modelo no think
 
@@ -25,6 +29,7 @@ DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre
 - !FIJATE de provar que onda YOLOv8 o v11 quiza son mas rapidos o podes usar eso para hacer rapido y despues los vl para el movimiento de el robot y las respuestas a comandos de voz
 
 - que este la mejor config y la actual, y una manera de pasar la actual a la mejor, luego de pruebas y tocar cosas, y tambien una manera de guardar la mejor si hay una mejor
+- hay que normalizar las imagenes? o quiza bajar la resolucion?
 
 - !FIJATE pensa esto, no tiene sentido analizar fotograma por fotograma de el video, lo que se puede hacer es que YOLO corra todos los frames para ver que realmente haya algo (ej: de 30 frames en 28 detecto una botella) y hacer el promedio de si detecto bien, y despues de 30 en 1 corres Qwen3 para tomar decisiones complejas y preguntas mas piolas (yolo detecta 2 botellas y despues yo le pregunto a qwen el color por ejemplo)
 

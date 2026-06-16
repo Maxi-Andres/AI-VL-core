@@ -1,9 +1,9 @@
 {
   "model": "qwen3-vl:4b-instruct",
-  "image": "fotos/clean/3.jpeg",
-  "folder": "fotos/clean",
-  "scope": "industrial",
-  "variant": "v3_minimal",
+  "image": "fotos/ciudad/101.jpeg",
+  "folder": "fotos/ciudad",
+  "scope": "all",
+  "variant": "people",
   "max_tokens": 512,
   "num_ctx": 4096,
   "think": false,

@@ -743,8 +743,8 @@ PATH_MENU = """
 ╔════════════════════════════════════════════════╗
 ║              PoC — choose a path               ║
 ╠════════════════════════════════════════════════╣
-║   1) VLM  (Ollama vision-language model)        ║
-║   2) YOLO (Ultralytics detector, in-process)    ║
+║   1) VLM  (Ollama vision-language model)       ║
+║   2) YOLO (Ultralytics detector, in-process)   ║
 ║                                                ║
 ║   0) Exit                                      ║
 ╚════════════════════════════════════════════════╝"""

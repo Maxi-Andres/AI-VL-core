@@ -252,6 +252,59 @@ _ALL_DEFAULT = {
     ),
 }
 
+# --- All: variant = people only -----------------------------------------------
+# Detect ONLY people. Same JSON contract; "type" is always "person".
+_ALL_PEOPLE = {
+    "system": (
+        "You are a vision assistant that detects people in an image. "
+        "You respond ONLY with a valid JSON object: no markdown, no fences, "
+        "no text before or after."
+    ),
+    "user": (
+        "Detect ALL the people (humans) visible in the image. Count partially "
+        "occluded people and people in the background; ignore everything that is "
+        "not a person.\n"
+        "For each person return an item with:\n"
+        '  "type": always "person",\n'
+        '  "description": short distinguishing detail (e.g. "worker with hard hat", '
+        '"person sitting", "child"), or "person" if none stands out,\n'
+        '  "bbox": [x_min, y_min, x_max, y_max] normalized between 0 and 1,\n'
+        '  "reading": text legible on the person (e.g. badge/jersey number) or null,\n'
+        '  "confidence": 0 to 1.\n'
+        'Return ONLY: {"objects": [ ... ]}. '
+        "Empty list only if there is NO person in the image."
+    ),
+}
+
+# --- All: variant = graspable objects (humanoid robot) ------------------------
+# Detect ONLY small, light objects a humanoid robot hand could pick up.
+_ALL_GRASPABLE = {
+    "system": (
+        "You are a vision assistant for a humanoid robot. You detect objects the "
+        "robot could pick up and carry with one hand. "
+        "You respond ONLY with a valid JSON object: no markdown, no fences, "
+        "no text before or after."
+    ),
+    "user": (
+        "Detect ALL the objects in the image that a humanoid robot hand could "
+        "GRASP and lift: small and light enough to be picked up with one hand "
+        "(roughly hand-sized, up to ~2 kg).\n"
+        "INCLUDE: cups, mugs, bottles, cans, tools (wrench, screwdriver, hammer), "
+        "small boxes, books, phones, remotes, pens, fruit, hand tools, small parts.\n"
+        "EXCLUDE: anything too big, heavy or fixed to grasp — furniture, "
+        "appliances, vehicles, walls, doors, large machinery, people, animals, "
+        "and the floor/ground.\n"
+        "For each graspable object return an item with:\n"
+        '  "type": free one-word category (e.g. "cup", "bottle", "tool", "box"),\n'
+        '  "description": what it is (short string),\n'
+        '  "bbox": [x_min, y_min, x_max, y_max] normalized between 0 and 1,\n'
+        '  "reading": legible text on the object if any, or null,\n'
+        '  "confidence": 0 to 1.\n'
+        'Return ONLY: {"objects": [ ... ]}. '
+        "Empty list only if there is NO graspable object."
+    ),
+}
+
 # Variant registry by scope. Add as many as you want and compare with
 # `python3 src/vlm_benchmark.py --variants <a> <b>` (or from the benchmark submenu).
 PROMPT_VARIANTS = {
@@ -262,6 +315,8 @@ PROMPT_VARIANTS = {
     },
     "all": {
         "default": _ALL_DEFAULT,
+        "people": _ALL_PEOPLE,
+        "graspable": _ALL_GRASPABLE,
     },
 }
 
