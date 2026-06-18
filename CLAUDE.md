@@ -8,7 +8,30 @@ A PoC harness for evaluating vision-language models (VLMs) served by **Ollama** 
 
 There are **two detection paths**, deliberately built as mirror images of each other:
 - **VLM path** (`vlm_*` files): the Ollama vision-language model. Open-vocabulary, reasons over a prompt, slower.
-- **YOLO path** (`yolo_*` files): an in-process **Ultralytics** detector. This is what the real deployment runs on the **live video stream**; the VLM is only invoked when the user asks a question about a frame. For now the YOLO path runs on **single images** only (the live-video path needs a WebSocket + front/back-end, out of scope here). The YOLO scripts emit the **same JSON contract** as the VLM (so the downstream consumer sees one shape), with `type`/`description` = class label and `reading` = null.
+- **YOLO path** (`yolo_*` files): an in-process **Ultralytics** detector. This is what the real deployment runs on the **live video stream**; the VLM is only invoked when the user asks a question about a frame. For now the YOLO path runs on **single images** only via the CLI. The YOLO scripts emit the **same JSON contract** as the VLM (so the downstream consumer sees one shape), with `type`/`description` = class label and `reading` = null.
+
+## Three-app architecture (live video)
+
+This repo (`iacore`) is the **inference core** — one of THREE independent apps,
+each its own git repo, that communicate **over the network by port, never by file
+path** (each may run on a different machine):
+
+```
+frontend (browser UI)  ──HTTP/WS──▶  backend (gateway)  ──HTTP──▶  iacore (this repo)
+```
+
+- **iacore** (here): owns YOLO + VLM + the heavy deps. The CLI (`menu.py`) runs it
+  locally on single images; `service.py` (FastAPI, `uvicorn service:app --port
+  8001`) exposes the SAME detection over HTTP (`/detect`, `/vlm`, `/options`,
+  `/classes`, `/health`). It imports `src/` locally — that's fine, it's the same
+  repo. It does NOT import the other two apps.
+- **backend**: the gateway the browser connects to (WebSocket for the live stream).
+  It relays frames to iacore's `/detect` and `/vlm` over HTTP. Its own repo.
+- **frontend**: the minimalist browser UI. Talks only to the backend. Its own repo.
+
+Keep this boundary: do not add a Python import or filesystem path from one app to
+another — they only know each other's URLs (env-configured). `service.py` is the
+ONLY networked surface of this repo; the CLI and `src/` stay deployment-agnostic.
 
 ## Code conventions
 

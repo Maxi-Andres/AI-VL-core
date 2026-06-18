@@ -187,16 +187,33 @@ def list_models(extra_dirs=None):
 _MODEL_CACHE = {}
 
 
+def _resolve_weights(model_name):
+    """Map a bare weights name to a real file if we already have it.
+
+    ultralytics resolves a bare name (e.g. 'yolo11s.pt') relative to the CURRENT
+    working directory and re-downloads it if missing. When the server runs from a
+    different folder than the repo, that means re-downloading weights that already
+    live in the repo root. So if the name isn't a path that exists, but a file of
+    that name sits in PROJECT_ROOT, use that absolute path instead. Otherwise hand
+    the name back unchanged and let ultralytics download it as before.
+    """
+    if os.path.exists(model_name):
+        return model_name
+    cand = os.path.join(PROJECT_ROOT, model_name)
+    return cand if os.path.exists(cand) else model_name
+
+
 def load_model(model_name):
     """Load (and cache) a YOLO model by weights name/path.
 
     The first load of a catalogue name (e.g. 'yolov8n.pt') triggers an automatic
-    download by ultralytics; afterwards it is cached in-process so the benchmark
-    does not reload it for every run.
+    download by ultralytics (unless the file already exists in PROJECT_ROOT, in
+    which case we reuse it — see _resolve_weights); afterwards it is cached
+    in-process so the benchmark does not reload it for every run.
     """
     if model_name not in _MODEL_CACHE:
         YOLO = load_ultralytics()
-        _MODEL_CACHE[model_name] = YOLO(model_name)
+        _MODEL_CACHE[model_name] = YOLO(_resolve_weights(model_name))
     return _MODEL_CACHE[model_name]
 
 
@@ -268,6 +285,32 @@ def save_annotated(result, out_path):
             return out_path
         except Exception:
             return None
+
+
+def detect(model_name, source, conf=0.25, imgsz=640, device=None, classes=None):
+    """Run YOLO on ANY ultralytics source and return the JSON-contract objects.
+
+    Unlike run_detection (which takes a file PATH and can save an annotated copy),
+    this accepts an in-memory source — a PIL.Image, a numpy array (HWC), a path or
+    a URL — so the live backend can feed decoded webcam frames without touching
+    disk. Returns the same shape used elsewhere: elapsed / objects / parsed / n /
+    speed. `classes` is a list of class NAMES to keep (None/empty = all).
+    """
+    model = load_model(model_name)
+    class_ids = resolve_class_ids(model, classes)
+    t0 = time.perf_counter()
+    results = model.predict(source=source, conf=conf, imgsz=imgsz, device=device,
+                            classes=class_ids, verbose=False)
+    elapsed = time.perf_counter() - t0
+    result = results[0]
+    objects = result_to_objects(result)
+    return {
+        "elapsed": elapsed,
+        "objects": objects,
+        "parsed": {"objects": objects},
+        "n": len(objects),
+        "speed": dict(getattr(result, "speed", {}) or {}),
+    }
 
 
 def run_detection(model_name, image_path, conf=0.25, imgsz=640, device=None,

@@ -76,45 +76,45 @@ other — see §5.
 ## 2. Target architecture (high level)
 
 ```
-                              ┌──────────────────────────────────────────────────────────┐
+                              ┌────────────────────────────────────────────────────────────┐
                               │                     BACKEND (one host)                     │
                               │                                                            │
-  ┌───────────────┐  frames  │  ┌────────────┐   every frame   ┌──────────────────────┐   │
-  │ Phone camera  │ ───────► │  │            │ ──────────────► │ YOLO  (run_detection) │   │
-  │ (getUserMedia │   (WS,   │  │  Ingest /  │                 │ in-proc, PyTorch/CUDA │   │
-  │  in web page) │  binary) │  │  frame bus │                 └───────────┬──────────┘   │
-  └───────────────┘          │  │ (asyncio   │                             │ objects[]    │
-        ~later~              │  │  queues)   │  ~1/sec or on-demand         ▼              │
-  ┌───────────────┐  frames  │  │            │ ──────────────► ┌──────────────────────┐   │
-  │ Robot camera  │ ───────► │  │            │   latest frame  │ Qwen3-VL (query_vlm) │   │
-  │ (RTSP/onboard)│          │  └─────┬──────┘                 │ Ollama /api/chat     │   │
-  └───────────────┘          │        │                        └───────────┬──────────┘   │
+  ┌───────────────┐  frames   │  ┌────────────┐   every frame   ┌──────────────────────┐   │
+  │ Phone camera  │ ───────►  │  │            │ ──────────────► │ YOLO  (run_detection)│   │
+  │ (getUserMedia │   (WS,    │  │  Ingest /  │                 │ in-proc, PyTorch/CUDA│   │
+  │  in web page) │  binary)  │  │  frame bus │                 └───────────┬──────────┘   │
+  └───────────────┘           │  │ (asyncio   │                             │ objects[]    │
+        ~later~               │  │  queues)   │  ~1/sec or on-demand         ▼             │
+  ┌───────────────┐  frames   │  │            │ ──────────────► ┌──────────────────────┐   │
+  │ Robot camera  │ ───────►  │  │            │   latest frame  │ Qwen3-VL (query_vlm) │   │
+  │ (RTSP/onboard)│           │  └─────┬──────┘                 │ Ollama /api/chat     │   │
+  └───────────────┘           │        │                        └───────────┬──────────┘   │
                               │        │ telemetry + detections             │ objects[]+   │
-                              │        ▼                                     │ reading/chat │
+                              │        ▼                                    │ reading/chat │
                               │  ┌────────────┐   pub/sub    ┌───────────────▼──────────┐  │
-                              │  │   Redis    │ ◄──────────► │  Persistence writer       │  │
-                              │  │ hot buffer │              │  - Mongo (docs/chat/dets) │  │
-                              │  │ + pub/sub  │              │  - FS/MinIO (frames)      │  │
-                              │  └─────┬──────┘              └───────────────────────────┘  │
-                              │        │ fan-out                                            │
-                              │        ▼                                                    │
-                              │  ┌────────────┐                                             │
-                              │  │ WebSocket  │                                             │
-                              │  │  endpoint  │                                             │
-                              └──┴─────┬──────┴─────────────────────────────────────────────┘
+                              │  │   Redis    │ ◄──────────► │  Persistence writer      │  │
+                              │  │ hot buffer │              │  - Mongo (docs/chat/dets)│  │
+                              │  │ + pub/sub  │              │  - FS/MinIO (frames)     │  │
+                              │  └─────┬──────┘              └──────────────────────────┘  │
+                              │        │ fan-out                                           │
+                              │        ▼                                                   │
+                              │  ┌────────────┐                                            │
+                              │  │ WebSocket  │                                            │
+                              │  │  endpoint  │                                            │
+                              └──┴─────┬──────┴────────────────────────────────────────────┘
                                        │  detections (JSON) + telemetry (JSON) + chat (JSON)
                                        ▼
-                              ┌─────────────────────────────────────────┐
+                              ┌───────────────────────────────────────────┐
                               │   FRONTEND  (React + Tailwind + TS)       │
                               │   one page:                               │
                               │   ┌─────────────┐  ┌───────────────────┐  │
                               │   │ <video> +   │  │ telemetry widgets │  │
                               │   │ canvas      │  │ (WS-driven)       │  │
                               │   │ overlay     │  └───────────────────┘  │
-                              │   └─────────────┘  ┌───────────────────┐  │
+                              │   └─────────────┘   ┌──────────────────┐  │
                               │   camera permission │ chat with the AI │  │
-                              │   (getUserMedia)    └───────────────────┘  │
-                              └─────────────────────────────────────────┘
+                              │   (getUserMedia)    └──────────────────┘  │
+                              └───────────────────────────────────────────┘
 ```
 
 Key idea: **the same WebSocket connection carries frames *up* and telemetry/detections/chat
@@ -252,20 +252,20 @@ The constraint: **YOLO must keep up with the stream; the VLM must never block it
 is a classic **async producer/consumer** with two consumers running at different rates.
 
 ```
-                       ┌──────────────────────────────────────────────┐
- incoming frames ────► │  frame bus (asyncio.Queue, maxsize=1..N)       │
+                       ┌───────────────────────────────────────────────┐
+ incoming frames ────► │  frame bus (asyncio.Queue, maxsize=1..N)      │
  (from WS / RTSP)      └───┬───────────────────────────────────┬───────┘
                            │ EVERY frame                        │ "latest frame" slot
                            ▼                                     │ (overwrite, drop stale)
-                  ┌─────────────────┐                            ▼
-                  │ YOLO consumer    │                   ┌─────────────────────┐
+                  ┌──────────────────┐                            ▼
+                  │ YOLO consumer    │                   ┌──────────────────────┐
                   │ run_detection()  │                   │ VLM consumer         │
                   │ ~30-100 ms       │                   │ query_vlm()          │
                   │ → push objects[] │                   │ ~1/sec OR on-demand  │
                   └────────┬─────────┘                   │ ~9-25 s              │
                            │                             │ → push objects[]+    │
                            ▼                             │   reading/answer     │
-                   Redis pub/sub ──► WebSocket ──► UI    └──────────┬──────────┘
+                   Redis pub/sub ──► WebSocket ──► UI    └──────────┬───────────┘
                                                                     ▼
                                                           Redis pub/sub ──► WS ──► UI
 ```
@@ -518,4 +518,4 @@ phone.
 | `objects[]` contract | `vlm_common` / `yolo_common` | `{type, description, reading, confidence, bbox(0..1)}` |
 | `config.json` | repo root | Shared VLM+YOLO config (model, scope, conf, imgsz, url, …) |
 | `results/` | repo root | Existing output convention; reuse for frame storage |
-```
+

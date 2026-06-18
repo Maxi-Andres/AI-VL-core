@@ -3,3 +3,9 @@ requests>=2.31
 # YOLO path only (vlm_common / the VLM path does NOT need this).
 # Pulls in torch + opencv; install it when you want to run the YOLO scripts/menu.
 ultralytics>=8.3
+
+# HTTP inference service (service.py) — exposes detection over a port so the
+# backend gateway can reach it. Not needed for the CLI (menu.py), only the service.
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pillow>=10.0

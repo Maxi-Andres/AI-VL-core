@@ -35,6 +35,30 @@ Two detection paths share one `config.json` and one `results/` folder:
   **Full YOLO guide** (usage, tuning variables, training, model differences):
   [`docs/YOLO.md`](docs/YOLO.md).
 
+## Live service (3-app architecture)
+
+This repo is the **inference core**, one of three independent apps that talk over
+the network **by port, never by file path** (each can run on a different machine):
+
+```
+frontend (browser UI)  ──HTTP/WS──▶  backend (gateway)  ──HTTP──▶  iacore (this repo)
+```
+
+The CLI (`menu.py`) still runs everything locally on single images. `service.py`
+additionally exposes the **same** YOLO + VLM detection over HTTP so the backend
+gateway can reach it — this is the live-video path that was previously out of
+scope. Run the service:
+
+```bash
+source .venv/bin/activate
+uvicorn service:app --host 0.0.0.0 --port 8001
+```
+
+Endpoints: `GET /health`, `GET /options`, `GET /classes?model=`,
+`POST /detect` (raw image bytes → boxes), `POST /vlm` (base64 image → VLM JSON).
+The browser never hits this service directly; only the backend does. The backend
+and frontend live in their own repos (`../backend`, `../frontend`).
+
 ## Setup (clone & run)
 
 After `git clone`, run the setup script once — it creates an isolated virtual
