@@ -6,6 +6,9 @@ deactivate                   # salis de el venv
   "max_tokens": 2048,
   "num_ctx": 8192,
 
+- !FIJATE que los cuadros sean de distintos colores como en las pruebas por que los hace todos verdes, y que en la compu veas la transmision de la camara, quiza que cuando entres te deje elegir entre ser admin/monitor y transmisor, que el transmisor solo vea el video que transmite
+y el monitor que pueda ver el video y que tenga todas las opciones
+
 - intentar evitar que el modelo piense, quiza fijate otra version o en hugging face, el │ qwen3-vl:4b │ piensa siempre aunque lo saques
 - proba con ollama en consola de una si te permite sacar el think NO, piensa igual siempre se necesita el modelo no think
 
