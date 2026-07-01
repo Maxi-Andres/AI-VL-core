@@ -244,6 +244,10 @@ def result_to_objects(result):
             "reading": None,
             "confidence": round(float(cf), 4),
             "bbox": [round(float(v), 4) for v in bb],
+            # Additive, UI-only hint: the model's class id, so the frontend can
+            # color each box with YOLO's own per-class palette. Downstream
+            # contract consumers ignore unknown keys.
+            "class_id": int(cl),
         })
     return objects
 
@@ -392,7 +396,7 @@ YOLO_DEFAULT_CONFIG = {
     "yolo_image": "fotos/clean/1.jpeg",  # image for the YOLO smoke test
     "yolo_folder": "fotos/clean",      # folder for the YOLO benchmark
     "yolo_conf": 0.25,                 # confidence threshold (single-image scan)
-    "yolo_imgsz": 640,                 # inference image size (single-image scan)
+    "yolo_imgsz": 320,                 # inference image size; 320 = smallest/fastest for live video
     "yolo_save": True,                 # save the annotated (boxed) image on a scan
     "yolo_classes": [],                # class NAMES to keep ([] = ALL, no filter)
 
