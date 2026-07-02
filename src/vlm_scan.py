@@ -34,11 +34,14 @@ from vlm_common import (
 
 
 def run_vlm_scan(image, model, scope="industrial", max_tokens=8192,
-                 think=True, url=OLLAMA_HOST, num_ctx=16384, variant=None):
+                 think=True, url=OLLAMA_HOST, num_ctx=16384, variant=None,
+                 prompt=None):
     """Run a VLM scan on a single image and print the result.
 
     With think=True it prints the model's reasoning LIVE (verbose).
     `variant` selects the prompt variant (see PROMPT_VARIANTS); None = scope default.
+    `prompt` (free-form question about the image) overrides scope/variant: the
+    model answers in plain text instead of the structured {objects:[...]} JSON.
     """
     try:
         img_b64 = encode_image(image)
@@ -46,18 +49,28 @@ def run_vlm_scan(image, model, scope="industrial", max_tokens=8192,
         print(f"[ERROR] Image not found: {image}", file=sys.stderr)
         return False
 
-    print(f"[..] Sending '{image}' to model '{model}' "
-          f"(mode: {scope}, prompt: {variant or 'default'}) ...")
+    label = "free prompt" if prompt else f"mode: {scope}, prompt: {variant or 'default'}"
+    print(f"[..] Sending '{image}' to model '{model}' ({label}) ...")
     try:
         res = query_vlm(img_b64, model, scope=scope, max_tokens=max_tokens,
                         think=think, url=url, timeout=300, num_ctx=num_ctx,
-                        verbose=True, size=image_size(image), variant=variant)
+                        verbose=True, size=image_size(image), variant=variant,
+                        prompt=prompt)
     except requests.RequestException as e:
         print(f"[ERROR] Request to Ollama failed: {e}", file=sys.stderr)
         print("        Is the service running? curl http://localhost:11434/api/version")
         return False
 
-    render_result(model, res)
+    if prompt:
+        # Free-form answer: print the plain-text content, not the JSON contract.
+        print("\n========== ANSWER ==========")
+        print(f"Model:       {model}")
+        print(f"E2E latency: {res['elapsed']:.2f} s")
+        print("-------------------------------")
+        print(res["content"].strip() or "[!] The model returned an empty answer.")
+        print("===============================")
+    else:
+        render_result(model, res)
     return True
 
 
@@ -75,6 +88,9 @@ def main():
                     help="Prompt variant (e.g. v1_original, v2_antiloop). "
                          "Default: the one in config.json. Variants are compared "
                          "with python3 src/vlm_benchmark.py --variants ...")
+    ap.add_argument("--prompt", default=None,
+                    help="Free-form question about the image (overrides "
+                         "--scope/--variant; the model answers in plain text)")
     ap.add_argument("--url", default=cfg["url"])
     ap.add_argument("--max-tokens", type=int, default=cfg["max_tokens"],
                     help="OUTPUT token cap / num_predict (includes reasoning)")
@@ -88,7 +104,8 @@ def main():
 
     ok = run_vlm_scan(args.image, args.model, scope=args.scope,
                       max_tokens=args.max_tokens, think=args.think, url=args.url,
-                      num_ctx=args.num_ctx, variant=args.variant)
+                      num_ctx=args.num_ctx, variant=args.variant,
+                      prompt=args.prompt)
     sys.exit(0 if ok else 1)
 
 

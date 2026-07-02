@@ -38,6 +38,14 @@ DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre
 
 - en el tiempo tenes que considerar la primera deteccion que tarda mas por que se carga el modelo en vram
 
+
+------------------------------------------------------------------------------------------------------------------------------------------------
+
+1. Resolución del VLM
+
+- Desde el celu (Live): sí, resolución full. Tanto el botón normal como el prompt libre usan captureFrame(video), que toma el frame a la resolución nativa de la cámara (calidad 0.85), no el frame reducido del streaming.
+- Desde el monitor del server: NO. El monitor solo tiene el frame espejado (~`imgsz`, chico), así que el VLM ahí usa esa resolución baja. Para que el monitor también use full habría que pedirle al celu una captura hi-res puntual (round-trip). Te lo dejo como opción si lo querés (no lo metí para no cambiar el ancho de banda del mirror).
+
 ------------------------------------------------------------------------------------------------------------------------------------------------
 
 =====================================================================================

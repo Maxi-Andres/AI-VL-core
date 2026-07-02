@@ -457,6 +457,7 @@ MENU = """
 ├────────────────────────────────────────────────┤
 │  ANALYZE                                       │
 │   1) Scan (1 image, live reasoning)            │
+│   p) Ask a free question about the image       │
 │   2) Benchmark (models × prompts, submenu)     │
 │                                                │
 │  CONFIGURE SCAN (saved to config)              │
@@ -485,6 +486,16 @@ def vlm_menu(cfg):
                          max_tokens=cfg["max_tokens"], think=cfg["think"],
                          url=cfg["url"], num_ctx=cfg["num_ctx"],
                          variant=cfg.get("variant"))
+        elif choice.lower() == "p":
+            question = ask("Your question about the image: ")
+            if question:
+                save_config(cfg)
+                run_vlm_scan(cfg["image"], cfg["model"],
+                             max_tokens=cfg["max_tokens"], think=cfg["think"],
+                             url=cfg["url"], num_ctx=cfg["num_ctx"],
+                             prompt=question)
+            else:
+                print("[!] Empty question, nothing sent.")
         elif choice == "2":
             benchmark_menu(cfg)
         elif choice == "3":
