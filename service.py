@@ -168,6 +168,7 @@ async def vlm(payload: dict):
             max_tokens=int(payload.get("max_tokens", CFG.get("max_tokens", 8192))),
             num_ctx=int(payload.get("num_ctx", CFG.get("num_ctx", 16384))),
             think=bool(payload.get("think", CFG.get("think", True))),
+            prompt=payload.get("prompt"),
             url=OLLAMA_URL,
             size=size,
         )
@@ -181,6 +182,7 @@ async def vlm(payload: dict):
         "model": model,
         "ok": res["ok"],
         "parsed": res["parsed"],
+        "content": res["content"],
         "reasoning": res["reasoning"],
         "elapsed_ms": round(res["elapsed"] * 1000, 1),
         "finish_reason": res["finish_reason"],

@@ -494,7 +494,7 @@ def extract_json(text):
 # --------------------------------------------------------------------------- #
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
               think=True, url=OLLAMA_HOST, timeout=300, num_ctx=16384,
-              verbose=False, size=None, variant=None):
+              verbose=False, size=None, variant=None, prompt=None):
     """Send an image to the VLM and return a dict with the response + diagnostics.
 
     Uses the native /api/chat endpoint with streaming:
@@ -512,22 +512,38 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     returns HTTP 400, so we omit it. See model_supports_thinking().
     Raises requests.RequestException if the network/server fails.
     """
-    sp = get_prompt(scope, variant)
+    # A free-form `prompt` (ask anything about the image) overrides the canned
+    # scope/variant prompts: use a neutral system message and DON'T force JSON, so
+    # the model answers in plain text instead of the {objects:[...]} contract.
+    if prompt:
+        system_msg = (
+            "You are a helpful visual assistant. Answer the user's question about "
+            "the image clearly and concisely, in plain text."
+        )
+        user_msg = prompt
+        force_json = False
+    else:
+        sp = get_prompt(scope, variant)
+        system_msg = sp["system"]
+        user_msg = sp["user"]
+        force_json = True
+
     supports_think = model_supports_thinking(model, url)
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": sp["system"]},
-            {"role": "user", "content": sp["user"], "images": [img_b64]},
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg, "images": [img_b64]},
         ],
         "stream": True,
-        "format": "json",  # forces valid JSON in content
         "options": {
             "temperature": 0.1,
             "num_predict": max_tokens,
             "num_ctx": num_ctx,
         },
     }
+    if force_json:
+        payload["format"] = "json"  # forces valid JSON in content
     # Only include `think` if the model supports it (otherwise Ollama returns 400).
     if supports_think:
         payload["think"] = think
@@ -569,9 +585,12 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
 
     content = "".join(content_buf)
     reasoning = "".join(think_buf)
-    parsed, ok = extract_json(content)
-    if ok:
-        normalize_bboxes(parsed, size)
+    if force_json:
+        parsed, ok = extract_json(content)
+        if ok:
+            normalize_bboxes(parsed, size)
+    else:
+        parsed, ok = None, False  # free-form answer lives in `content`
     return {
         "elapsed": elapsed,
         "content": content,
