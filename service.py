@@ -18,6 +18,9 @@ the browser never talks to iacore directly. Endpoints:
     GET  /classes?model=     class names a YOLO model can detect.
     POST /detect             raw image bytes in body + params -> {objects, ...}.
     POST /vlm                {image(base64), scope, variant, model} -> VLM JSON.
+    POST /transcribe         raw audio bytes in body -> {text, ...} (speech-to-text).
+    GET  /tts/voices         installed Piper voices (for the UI voice picker).
+    POST /speak              {text, voice} -> WAV audio (neural text-to-speech).
 
 Run (from the iacore repo root, venv active):
     uvicorn service:app --host 0.0.0.0 --port 8001
@@ -35,11 +38,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src
 from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from PIL import Image
 
 import yolo_common
 import vlm_common
+import asr_common
+import tts_common
 
 app = FastAPI(title="iacore — inference service")
 
@@ -188,3 +193,49 @@ async def vlm(payload: dict):
         "finish_reason": res["finish_reason"],
         "did_think": res["did_think"],
     }
+
+
+@app.post("/transcribe")
+async def transcribe(
+    request: Request,
+    language: str = Query(None),
+    translate: bool = Query(False),
+):
+    """Transcribe one dictated audio clip. The audio is the raw request body
+    (webm/opus or mp4/aac bytes as the browser recorded it); optional params come
+    as query string. Runs Whisper locally via faster-whisper. Slow enough (model +
+    decode) to offload to a thread so the event loop stays free."""
+    data = await request.body()
+    if not data:
+        return JSONResponse({"error": "empty body (expected audio bytes)"}, status_code=400)
+    try:
+        res = await run_in_threadpool(
+            asr_common.transcribe, data, language=language or None, translate=translate
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    return {
+        "text": res["text"],
+        "language": res["language"],
+        "elapsed_ms": round(res["elapsed"] * 1000, 1),
+    }
+
+
+@app.get("/tts/voices")
+def tts_voices():
+    """List installed Piper voices so the UI can offer a voice picker."""
+    return {"voices": tts_common.list_voices(), "default": tts_common.TTS_VOICE}
+
+
+@app.post("/speak")
+async def speak(payload: dict):
+    """Neural text-to-speech via Piper. Returns a WAV the browser plays. Slow-ish
+    (synthesis) -> offload to a thread so the event loop stays free."""
+    text = (payload.get("text") or "").strip()
+    if not text:
+        return JSONResponse({"error": "empty text"}, status_code=400)
+    try:
+        res = await run_in_threadpool(tts_common.synthesize, text, payload.get("voice"))
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+    return Response(content=res["wav"], media_type="audio/wav")

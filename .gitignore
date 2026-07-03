@@ -13,3 +13,6 @@ results/annotated/
 
 # YOLO weights (auto-downloaded by ultralytics on first use)
 *.pt
+
+# Piper TTS voice models (downloaded by the installer)
+piper_voices/

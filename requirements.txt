@@ -9,3 +9,15 @@ ultralytics>=8.3
 fastapi>=0.110
 uvicorn[standard]>=0.29
 pillow>=10.0
+
+# Speech-to-text path only (asr_common / the /transcribe endpoint). Runs Whisper
+# locally via CTranslate2; pulls in PyAV (bundles ffmpeg) so it decodes the browser's
+# webm/opus and mp4/aac clips without a separate ffmpeg binary. The VLM/YOLO paths
+# do NOT need this. Model weights (~150 MB for `base`) download on first use.
+faster-whisper>=1.0
+
+# Text-to-speech path only (tts_common / the /speak endpoint). Local neural voices
+# via Piper (ONNX); nicer + consistent across devices, fully offline. Voice model
+# files are downloaded by the installer into piper_voices/. Browser TTS works
+# without this.
+piper-tts>=1.2,<1.3
