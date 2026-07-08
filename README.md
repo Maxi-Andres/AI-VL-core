@@ -55,9 +55,11 @@ uvicorn service:app --host 0.0.0.0 --port 8001
 ```
 
 Endpoints: `GET /health`, `GET /options`, `GET /classes?model=`,
-`POST /detect` (raw image bytes → boxes), `POST /vlm` (base64 image → VLM JSON).
-The browser never hits this service directly; only the backend does. The backend
-and frontend live in their own repos (`../backend`, `../frontend`).
+`POST /detect` (raw image bytes → boxes), `POST /vlm` (base64 image → VLM JSON),
+`POST /vlm/stream` (streamed VLM answer), plus speech: `POST /transcribe`,
+`POST /speak`, `GET /tts/voices`. The browser never hits this service directly;
+only the backend does. The backend and frontend live in their own sibling repos
+(`AI-VL-backend`, `AI-VL-frontend`).
 
 ## Setup (clone & run)
 
@@ -67,7 +69,7 @@ Python (which on many distros, including this one with Python 3.14, is
 "externally-managed" and rejects `pip install`).
 
 ```bash
-git clone <repo> && cd "VL test"
+git clone <repo> AI-VL-core && cd AI-VL-core
 ./setup.sh                 # creates .venv/ and installs requirements
 source .venv/bin/activate  # then use plain `python` / `yolo`
 python menu.py
