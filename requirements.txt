@@ -19,5 +19,6 @@ faster-whisper>=1.0
 # Text-to-speech path only (tts_common / the /speak endpoint). Local neural voices
 # via Piper (ONNX); nicer + consistent across devices, fully offline. Voice model
 # files are downloaded by the installer into piper_voices/. Browser TTS works
-# without this.
-piper-tts>=1.2,<1.3
+# without this. Needs >=1.3 on modern Python (3.12+): 1.2.x pins piper-phonemize,
+# which has no wheels there.
+piper-tts>=1.3
