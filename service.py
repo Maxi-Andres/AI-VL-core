@@ -18,6 +18,8 @@ the browser never talks to iacore directly. Endpoints:
     GET  /classes?model=     class names a YOLO model can detect.
     POST /detect             raw image bytes in body + params -> {objects, ...}.
     POST /vlm                {image(base64), scope, variant, model} -> VLM JSON.
+    POST /vlm/stream         {image(base64), prompt, model} -> plain text, STREAMED
+                             (free-prompt answer, token by token, for spoken replies).
     POST /transcribe         raw audio bytes in body -> {text, ...} (speech-to-text).
     GET  /tts/voices         installed Piper voices (for the UI voice picker).
     POST /speak              {text, voice} -> WAV audio (neural text-to-speech).
@@ -38,7 +40,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src
 from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from PIL import Image
 
 import yolo_common
@@ -219,6 +221,40 @@ async def transcribe(
         "language": res["language"],
         "elapsed_ms": round(res["elapsed"] * 1000, 1),
     }
+
+
+@app.post("/vlm/stream")
+async def vlm_stream(payload: dict):
+    """Stream a free-prompt answer as plain UTF-8 text, chunk by chunk, so the
+    browser can display it live and speak it sentence by sentence as it arrives.
+    Only the free-prompt (plain-text) case is streamed; detection stays on /vlm."""
+    b64 = payload.get("image", "")
+    if "," in b64:
+        b64 = b64.split(",", 1)[1]
+    prompt = (payload.get("prompt") or "").strip()
+    if not prompt:
+        return JSONResponse({"error": "missing 'prompt'"}, status_code=400)
+    try:
+        base64.b64decode(b64)
+    except Exception as e:
+        return JSONResponse({"error": f"bad image: {e}"}, status_code=400)
+
+    model = payload.get("model") or CFG.get("model", "qwen3-vl:4b")
+
+    def gen():
+        try:
+            for piece in vlm_common.query_vlm_stream(
+                b64, model, prompt,
+                max_tokens=int(payload.get("max_tokens", CFG.get("max_tokens", 8192))),
+                num_ctx=int(payload.get("num_ctx", CFG.get("num_ctx", 16384))),
+                url=OLLAMA_URL,
+            ):
+                yield piece
+        except Exception as e:
+            # Surface the error inline so the client sees why the stream stopped.
+            yield f"\n[error] {e}"
+
+    return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
 
 
 @app.get("/tts/voices")

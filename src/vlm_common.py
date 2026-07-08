@@ -606,6 +606,56 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     }
 
 
+def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
+                     url=OLLAMA_HOST):
+    """Stream a FREE-PROMPT answer token by token (a generator of text pieces).
+
+    This is the streaming sibling of query_vlm for the "ask anything" case only:
+    it uses the same neutral system message and does NOT force JSON, so the answer
+    is plain text that can be spoken sentence by sentence as it arrives. It yields
+    only the `content` pieces (the model's answer); any `thinking` is ignored (it
+    goes to a separate field and is not meant to be read aloud). The caller (the
+    service) forwards each piece to the browser as it is produced.
+
+    For the fastest time-to-first-word use an instruct model (no thinking), so the
+    answer starts immediately instead of after a reasoning block.
+    """
+    system_msg = (
+        "You are a helpful visual assistant. Answer the user's question about "
+        "the image clearly and concisely, in plain text."
+    )
+    supports_think = model_supports_thinking(model, url)
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": prompt, "images": [img_b64]},
+        ],
+        "stream": True,
+        "options": {
+            "temperature": 0.1,
+            "num_predict": max_tokens,
+            "num_ctx": num_ctx,
+        },
+    }
+    if supports_think:
+        payload["think"] = False  # ask for no reasoning; content should come first
+    chat_url = host_of(url) + "/api/chat"
+
+    with requests.post(chat_url, json=payload, stream=True, timeout=600) as r:
+        r.raise_for_status()
+        for line in r.iter_lines():
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            piece = chunk.get("message", {}).get("content")
+            if piece:
+                yield piece
+
+
 # --------------------------------------------------------------------------- #
 # Image listing and UI helpers (progress bar / timings)
 # --------------------------------------------------------------------------- #
