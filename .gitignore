@@ -16,3 +16,6 @@ results/annotated/
 
 # Piper TTS voice models (downloaded by the installer)
 piper_voices/
+
+# Kokoro TTS model files (downloaded by the installer; ~340 MB)
+kokoro_models/
