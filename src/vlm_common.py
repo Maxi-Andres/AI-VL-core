@@ -33,8 +33,6 @@ import requests
 # Ollama base host. /api/chat and /api/tags are appended to it.
 # Can be overridden via config.json or --url (also accepts old URLs with /v1).
 OLLAMA_HOST = "http://localhost:11434"
-# Backward compatibility: some scripts/imports use OLLAMA_URL.
-OLLAMA_URL = OLLAMA_HOST
 
 # Image extensions the benchmark recognizes when scanning a folder.
 IMG_EXTS = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp")
@@ -69,6 +67,46 @@ def host_of(url):
         if url.endswith(suffix):
             return url[: -len(suffix)]
     return url.rstrip("/")
+
+
+# --------------------------------------------------------------------------- #
+# Benchmark helpers (shared by vlm_benchmark and yolo_benchmark)
+# --------------------------------------------------------------------------- #
+def pctl(values, p):
+    """Linear-interpolated percentile p (0..100). NaN on an empty list."""
+    if not values:
+        return float("nan")
+    s = sorted(values)
+    k = (len(s) - 1) * (p / 100.0)
+    f = int(k)
+    c = min(f + 1, len(s) - 1)
+    return s[f] + (s[c] - s[f]) * (k - f)
+
+
+def dedup(seq):
+    """Remove duplicates while preserving order of appearance."""
+    seen, out = set(), []
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
+    return out
+
+
+def as_list(v, fallback):
+    """Normalize a value (scalar/list/None) to a non-empty, deduplicated list.
+
+    Lets the sweep dimensions accept either a single value or a list; if it ends
+    up empty, use `fallback` (a list).
+    """
+    if v is None:
+        items = []
+    elif isinstance(v, (list, tuple)):
+        items = list(v)
+    else:
+        items = [v]
+    items = dedup(items)
+    return items or list(fallback)
 
 
 # --------------------------------------------------------------------------- #
@@ -410,11 +448,12 @@ def encode_image(path):
 
 
 def image_size(path):
-    """Return (width, height) by reading the file header. None if it cannot.
+    """Return (width, height). None if it cannot be determined.
 
-    Supports JPEG and PNG (no extra dependencies). qwen3-vl returns the bbox in
-    absolute pixels of the file, so we need the dimensions to normalize them
-    to 0..1.
+    Fast path reads the JPEG/PNG header with no extra dependencies; for the other
+    formats in IMG_EXTS (bmp/webp) — or any header we fail to parse — it falls back
+    to PIL. qwen3-vl returns the bbox in absolute pixels of the file, so we need the
+    dimensions to normalize them to 0..1 (a missing size leaves bboxes un-normalized).
     """
     try:
         with open(path, "rb") as f:
@@ -440,7 +479,14 @@ def image_size(path):
                 return w, h
     except (OSError, struct.error):
         pass
-    return None
+    # Fallback for bmp/webp and any header we couldn't parse. PIL is already a
+    # dependency (used by service.py); lazy-import so the fast path needs nothing.
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            return im.size  # (width, height)
+    except Exception:
+        return None
 
 
 def normalize_bboxes(parsed, size):

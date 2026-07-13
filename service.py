@@ -41,6 +41,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
+from pydantic import BaseModel
 from PIL import Image
 
 import yolo_common
@@ -61,6 +62,35 @@ app.add_middleware(
 
 CFG = yolo_common.load_config()
 OLLAMA_URL = os.environ.get("OLLAMA_URL", CFG.get("url", vlm_common.OLLAMA_HOST))
+
+
+# --------------------------------------------------------------------------- #
+# Request models. Typed bodies validate at the edge (malformed input -> 422 with
+# a clear message) instead of raising deep inside the handler. Defaults come from
+# config.json (loaded once into CFG at startup), matching the CLI's behavior.
+# --------------------------------------------------------------------------- #
+class VlmRequest(BaseModel):
+    image: str = ""
+    model: str | None = None
+    scope: str = CFG.get("scope", "industrial")
+    variant: str | None = CFG.get("variant")
+    max_tokens: int = CFG.get("max_tokens", 8192)
+    num_ctx: int = CFG.get("num_ctx", 16384)
+    think: bool = CFG.get("think", True)
+    prompt: str | None = None
+
+
+class VlmStreamRequest(BaseModel):
+    image: str = ""
+    prompt: str = ""
+    model: str | None = None
+    max_tokens: int = CFG.get("max_tokens", 8192)
+    num_ctx: int = CFG.get("num_ctx", 16384)
+
+
+class SpeakRequest(BaseModel):
+    text: str = ""
+    voice: str | None = None
 
 
 def _decode(data):
@@ -154,9 +184,9 @@ async def detect(
 
 
 @app.post("/vlm")
-async def vlm(payload: dict):
+async def vlm(req: VlmRequest):
     """Run the Ollama VLM on one frame. Slow (seconds) -> plain request/response."""
-    b64 = payload.get("image", "")
+    b64 = req.image
     if "," in b64:                       # tolerate a data-URI prefix
         b64 = b64.split(",", 1)[1]
     try:
@@ -165,17 +195,17 @@ async def vlm(payload: dict):
     except Exception as e:
         return JSONResponse({"error": f"bad image: {e}"}, status_code=400)
 
-    model = payload.get("model") or CFG.get("model", "qwen3-vl:4b")
+    model = req.model or CFG.get("model", "qwen3-vl:4b")
 
     def _run():
         return vlm_common.query_vlm(
             b64, model,
-            scope=payload.get("scope", CFG.get("scope", "industrial")),
-            variant=payload.get("variant", CFG.get("variant")),
-            max_tokens=int(payload.get("max_tokens", CFG.get("max_tokens", 8192))),
-            num_ctx=int(payload.get("num_ctx", CFG.get("num_ctx", 16384))),
-            think=bool(payload.get("think", CFG.get("think", True))),
-            prompt=payload.get("prompt"),
+            scope=req.scope,
+            variant=req.variant,
+            max_tokens=req.max_tokens,
+            num_ctx=req.num_ctx,
+            think=req.think,
+            prompt=req.prompt,
             url=OLLAMA_URL,
             size=size,
         )
@@ -224,14 +254,14 @@ async def transcribe(
 
 
 @app.post("/vlm/stream")
-async def vlm_stream(payload: dict):
+async def vlm_stream(req: VlmStreamRequest):
     """Stream a free-prompt answer as plain UTF-8 text, chunk by chunk, so the
     browser can display it live and speak it sentence by sentence as it arrives.
     Only the free-prompt (plain-text) case is streamed; detection stays on /vlm."""
-    b64 = payload.get("image", "")
+    b64 = req.image
     if "," in b64:
         b64 = b64.split(",", 1)[1]
-    prompt = (payload.get("prompt") or "").strip()
+    prompt = req.prompt.strip()
     if not prompt:
         return JSONResponse({"error": "missing 'prompt'"}, status_code=400)
     try:
@@ -239,14 +269,14 @@ async def vlm_stream(payload: dict):
     except Exception as e:
         return JSONResponse({"error": f"bad image: {e}"}, status_code=400)
 
-    model = payload.get("model") or CFG.get("model", "qwen3-vl:4b")
+    model = req.model or CFG.get("model", "qwen3-vl:4b")
 
     def gen():
         try:
             for piece in vlm_common.query_vlm_stream(
                 b64, model, prompt,
-                max_tokens=int(payload.get("max_tokens", CFG.get("max_tokens", 8192))),
-                num_ctx=int(payload.get("num_ctx", CFG.get("num_ctx", 16384))),
+                max_tokens=req.max_tokens,
+                num_ctx=req.num_ctx,
                 url=OLLAMA_URL,
             ):
                 yield piece
@@ -264,14 +294,14 @@ def tts_voices():
 
 
 @app.post("/speak")
-async def speak(payload: dict):
+async def speak(req: SpeakRequest):
     """Neural text-to-speech via Piper. Returns a WAV the browser plays. Slow-ish
     (synthesis) -> offload to a thread so the event loop stays free."""
-    text = (payload.get("text") or "").strip()
+    text = req.text.strip()
     if not text:
         return JSONResponse({"error": "empty text"}, status_code=400)
     try:
-        res = await run_in_threadpool(tts_common.synthesize, text, payload.get("voice"))
+        res = await run_in_threadpool(tts_common.synthesize, text, req.voice)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     return Response(content=res["wav"], media_type="audio/wav")

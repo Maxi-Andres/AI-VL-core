@@ -35,6 +35,7 @@ import requests
 from vlm_common import (
     PROMPT_VARIANTS,
     SCOPES,
+    host_of,
     list_images,
     model_supports_thinking,
     save_config,
@@ -43,7 +44,6 @@ from vlm_common import (
 # config.json AND fills in the YOLO-only defaults, so the single menu can drive
 # both paths off one config object.
 from yolo_common import (
-    KNOWN_MODELS,
     class_names as yolo_class_names,
     list_models as list_yolo_models,
     load_config,
@@ -68,7 +68,7 @@ def ask(prompt):
 
 def list_ollama_models(url):
     """List the installed models by querying /api/tags. [] on failure."""
-    host = url.split("/v1")[0]
+    host = host_of(url)
     try:
         r = requests.get(f"{host}/api/tags", timeout=5)
         r.raise_for_status()
@@ -81,8 +81,8 @@ def choose_from_list(title, options, current):
     """Numbered menu (single selection). Empty Enter = keep the current one."""
     print(f"\n{title}  (current: {current})")
     for i, opt in enumerate(options, 1):
-        marca = " <-- current" if opt == current else ""
-        print(f"  {i}) {opt}{marca}")
+        mark = " <-- current" if opt == current else ""
+        print(f"  {i}) {opt}{mark}")
     print("  0) type a value manually")
     sel = ask("Choose a number (Enter = keep current): ")
     if sel == "":
@@ -104,8 +104,8 @@ def choose_multi(title, options, current):
     print(f"\n{title}")
     cur = set(current)
     for i, opt in enumerate(options, 1):
-        marca = " *" if opt in cur else ""
-        print(f"  {i}) {opt}{marca}")
+        mark = " *" if opt in cur else ""
+        print(f"  {i}) {opt}{mark}")
     print("  (items marked with * are the current selection)")
     sel = ask("Choose (e.g.: 1,3,5  or  1-4,7  or  'all'  or  'none'; Enter = keep): ")
     if sel == "":
