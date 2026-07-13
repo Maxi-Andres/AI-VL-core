@@ -35,6 +35,16 @@ images. `service.py`/`menu.py` import `src/` locally — fine, same repo. Do **n
 add a Python import or filesystem path to the other two apps; they only know each
 other's URLs (env-configured). The CLI and `src/` stay deployment-agnostic.
 
+## Robot control role (Unitree G1 by voice)
+
+iacore is the **perception + language brain** for an active goal: driving a real
+Unitree G1 by voice. Most new robot pieces land here: a **command interpreter**
+(text → skill JSON, reusing `query_vlm`) and **perception-3D** (existing YOLO bbox +
+depth + camera intrinsics + hand-eye → a 3D grasp pose). Execution happens in a
+separate ROS2 node against `~/Desktop/unitree_ros2`; reusable RL policies and grasp
+skills come from the `~/Documents/LuckyEngine` G1 simulator. Full plan and file
+pointers: **`../ROBOT_CONTROL.md`** at the ecosystem root.
+
 ## Code conventions
 
 - **Everything in this repo is in English — absolutely everything**: comments,
