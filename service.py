@@ -101,6 +101,7 @@ class CommandRequest(BaseModel):
     text: str = ""                       # transcribed spoken command
     image: str = ""                      # optional base64 frame (for future vision skills)
     model: str | None = None
+    robot: str = command_common.DEFAULT_ROBOT   # "g1" | "go2" (which skill catalog)
     num_ctx: int = CFG.get("num_ctx", 16384)
     max_tokens: int = 1024               # a skill JSON is tiny; cap output low for speed
 
@@ -321,6 +322,7 @@ async def command(req: CommandRequest):
     def _run():
         return command_common.interpret(
             text, model,
+            robot=req.robot,
             image_b64=b64 or None,
             url=OLLAMA_URL,
             num_ctx=req.num_ctx,
@@ -335,6 +337,7 @@ async def command(req: CommandRequest):
     return {
         "model": model,
         "ok": res["ok"],
+        "robot": res["robot"],
         "skill": res["skill"],
         "params": res["params"],
         "say": res["say"],
@@ -345,17 +348,14 @@ async def command(req: CommandRequest):
 
 
 @app.get("/skills")
-def skills():
-    """The G1 skill catalog the /command interpreter can emit (single source of
-    truth in command_common.SKILLS). Lets the UI/executor discover skills + params
-    without hard-coding them."""
+def skills(robot: str = Query(None)):
+    """The skill catalog the /command interpreter can emit for one robot (single
+    source of truth in command_common). `robot` selects the catalog (g1|go2);
+    `robots` lists every robot so the UI can build a selector. Lets the
+    UI/executor discover skills + params without hard-coding them."""
     return {
-        "skills": {
-            name: {"desc": s["desc"], "params": s["params"]}
-            for name, s in command_common.SKILLS.items()
-        },
-        "speed_presets": command_common.SPEED_PRESETS,
-        "arm_actions": command_common.ARM_ACTION_IDS,
+        **command_common.catalog(robot or command_common.DEFAULT_ROBOT),
+        "robots": command_common.list_robots(),
     }
 
 
