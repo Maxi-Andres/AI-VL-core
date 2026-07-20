@@ -20,6 +20,9 @@ the browser never talks to iacore directly. Endpoints:
     POST /vlm                {image(base64), scope, variant, model} -> VLM JSON.
     POST /vlm/stream         {image(base64), prompt, model} -> plain text, STREAMED
                              (free-prompt answer, token by token, for spoken replies).
+    POST /command            {text, image?, model} -> {skill, params, say, ...}
+                             (Unitree G1 command interpreter: speech text -> skill JSON).
+    GET  /skills             the G1 skill catalog the interpreter can emit.
     POST /transcribe         raw audio bytes in body -> {text, ...} (speech-to-text).
     GET  /tts/voices         installed Piper voices (for the UI voice picker).
     POST /speak              {text, voice} -> WAV audio (neural text-to-speech).
@@ -46,6 +49,7 @@ from PIL import Image
 
 import yolo_common
 import vlm_common
+import command_common
 import asr_common
 import tts_common
 
@@ -91,6 +95,14 @@ class VlmStreamRequest(BaseModel):
 class SpeakRequest(BaseModel):
     text: str = ""
     voice: str | None = None
+
+
+class CommandRequest(BaseModel):
+    text: str = ""                       # transcribed spoken command
+    image: str = ""                      # optional base64 frame (for future vision skills)
+    model: str | None = None
+    num_ctx: int = CFG.get("num_ctx", 16384)
+    max_tokens: int = 1024               # a skill JSON is tiny; cap output low for speed
 
 
 def _decode(data):
@@ -285,6 +297,66 @@ async def vlm_stream(req: VlmStreamRequest):
             yield f"\n[error] {e}"
 
     return StreamingResponse(gen(), media_type="text/plain; charset=utf-8")
+
+
+@app.post("/command")
+async def command(req: CommandRequest):
+    """Interpret a spoken/typed command into a Unitree G1 skill JSON.
+
+    This is the language brain (ROBOT_CONTROL.md Phase 1): it maps the transcribed
+    text to ONE skill + params over the fixed catalog in command_common.SKILLS
+    (locomotion, posture, gestures, arm presets — every action the SDK ships). It
+    does NOT move the robot; a downstream executor turns the skill into SDK calls.
+    Reuses the Ollama client, so it's slow-ish (seconds) -> offload to a thread."""
+    text = req.text.strip()
+    if not text:
+        return JSONResponse({"error": "empty text"}, status_code=400)
+
+    b64 = req.image
+    if "," in b64:                       # tolerate a data-URI prefix
+        b64 = b64.split(",", 1)[1]
+
+    model = req.model or CFG.get("model", "qwen3-vl:4b")
+
+    def _run():
+        return command_common.interpret(
+            text, model,
+            image_b64=b64 or None,
+            url=OLLAMA_URL,
+            num_ctx=req.num_ctx,
+            max_tokens=req.max_tokens,
+        )
+
+    try:
+        res = await run_in_threadpool(_run)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+    return {
+        "model": model,
+        "ok": res["ok"],
+        "skill": res["skill"],
+        "params": res["params"],
+        "say": res["say"],
+        "understood": res["understood"],
+        "content": res["content"],
+        "elapsed_ms": res["elapsed_ms"],
+    }
+
+
+@app.get("/skills")
+def skills():
+    """The G1 skill catalog the /command interpreter can emit (single source of
+    truth in command_common.SKILLS). Lets the UI/executor discover skills + params
+    without hard-coding them."""
+    return {
+        "skills": {
+            name: {"desc": s["desc"], "params": s["params"]}
+            for name, s in command_common.SKILLS.items()
+        },
+        "speed_presets": command_common.SPEED_PRESETS,
+        "arm_actions": command_common.ARM_ACTION_IDS,
+    }
 
 
 @app.get("/tts/voices")

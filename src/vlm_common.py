@@ -538,6 +538,55 @@ def extract_json(text):
 # --------------------------------------------------------------------------- #
 # VLM client (native endpoint /api/chat, with streaming)
 # --------------------------------------------------------------------------- #
+def stream_chat(payload, url=OLLAMA_HOST, timeout=300, verbose=False):
+    """POST an Ollama /api/chat request (stream=True) and consume the stream.
+
+    Returns (content, reasoning, done_reason, in_tokens, out_tokens):
+      - content:  the answer text (the JSON, when format:"json" was requested);
+      - reasoning: the `thinking` field, concatenated (empty if the model did not
+        reason or does not support it);
+      - done_reason / in_tokens / out_tokens: taken from the final chunk.
+    With verbose=True it prints the reasoning live (dim) as it streams.
+
+    Shared by query_vlm (detection) and the command interpreter
+    (command_common.interpret) so the streaming/parse loop lives in ONE place.
+    Raises requests.RequestException if the network/server fails.
+    """
+    think_buf, content_buf = [], []
+    done_reason = in_tok = out_tok = None
+    printed_header = False
+    chat_url = host_of(url) + "/api/chat"
+
+    with requests.post(chat_url, json=payload, stream=True, timeout=timeout) as r:
+        r.raise_for_status()
+        for line in r.iter_lines():
+            if not line:
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg = chunk.get("message", {})
+            piece = msg.get("thinking")
+            if piece:
+                think_buf.append(piece)
+                if verbose:
+                    if not printed_header:
+                        print("\n\033[2m💭 thinking: ", end="", flush=True)
+                        printed_header = True
+                    print(piece, end="", flush=True)
+            if msg.get("content"):
+                content_buf.append(msg["content"])
+            if chunk.get("done"):
+                done_reason = chunk.get("done_reason")
+                in_tok = chunk.get("prompt_eval_count")
+                out_tok = chunk.get("eval_count")
+    if verbose and printed_header:
+        print("\033[0m", flush=True)  # closes the "dim" and moves to a new line
+
+    return "".join(content_buf), "".join(think_buf), done_reason, in_tok, out_tok
+
+
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
               think=True, url=OLLAMA_HOST, timeout=300, num_ctx=16384,
               verbose=False, size=None, variant=None, prompt=None):
@@ -593,44 +642,12 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     # Only include `think` if the model supports it (otherwise Ollama returns 400).
     if supports_think:
         payload["think"] = think
-    chat_url = host_of(url) + "/api/chat"
-
-    think_buf, content_buf = [], []
-    done_reason = None
-    in_tok = out_tok = None
-    printed_header = False
 
     t0 = time.perf_counter()
-    with requests.post(chat_url, json=payload, stream=True, timeout=timeout) as r:
-        r.raise_for_status()
-        for line in r.iter_lines():
-            if not line:
-                continue
-            try:
-                chunk = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            msg = chunk.get("message", {})
-            piece = msg.get("thinking")
-            if piece:
-                think_buf.append(piece)
-                if verbose:
-                    if not printed_header:
-                        print("\n\033[2m💭 thinking: ", end="", flush=True)
-                        printed_header = True
-                    print(piece, end="", flush=True)
-            if msg.get("content"):
-                content_buf.append(msg["content"])
-            if chunk.get("done"):
-                done_reason = chunk.get("done_reason")
-                in_tok = chunk.get("prompt_eval_count")
-                out_tok = chunk.get("eval_count")
-    if verbose and printed_header:
-        print("\033[0m", flush=True)  # closes the "dim" and moves to a new line
+    content, reasoning, done_reason, in_tok, out_tok = stream_chat(
+        payload, url=url, timeout=timeout, verbose=verbose)
     elapsed = time.perf_counter() - t0
 
-    content = "".join(content_buf)
-    reasoning = "".join(think_buf)
     if force_json:
         parsed, ok = extract_json(content)
         if ok:
