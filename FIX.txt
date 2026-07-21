@@ -39,6 +39,18 @@ DONE - que los benchmarks se guarden en distintos archivos que no se pisen entre
 - en el tiempo tenes que considerar la primera deteccion que tarda mas por que se carga el modelo en vram
 
 
+cuando le decis interpret es mucho mas rapida, eso debe ser por que no manda imagen
+tiene que poder dicernir si analizar la imagen o hacer un movimiento, 
+
+dividir en dos las ocoines por que es muy largo ya
+
+despues en la version final hay que implementar que solo este el modo de voz y que el sepa elegir si es una accion o si es una pregunta, y si tiene o no que usar las imagenes de la camara, ya sea para una accion o para una pregunta.
+
+hace las cosas para el perro men no solo para el humano, aparte el perro es mas facil de levantar y usar
+
+que se pueda poner para que ejecute los comandos solo tipo switch on off y que se pueda tambien switch para que ejecute los comandos de una o que tengas que tocar el boton para activarlos
+
+
 ------------------------------------------------------------------------------------------------------------------------------------------------
 
 1. Resolución del VLM
