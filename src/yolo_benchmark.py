@@ -37,9 +37,11 @@ import time
 from datetime import datetime
 
 from yolo_common import (
+    as_list,
     fmt_secs,
     list_images,
     load_config,
+    pctl,
     progress_bar,
     results_path,
     run_detection,
@@ -58,38 +60,6 @@ def fmt_ms(s):
     if s < 1.0:
         return f"{s * 1000:.0f}ms"
     return fmt_secs(s)
-
-
-def pctl(values, p):
-    if not values:
-        return float("nan")
-    s = sorted(values)
-    k = (len(s) - 1) * (p / 100.0)
-    f = int(k)
-    c = min(f + 1, len(s) - 1)
-    return s[f] + (s[c] - s[f]) * (k - f)
-
-
-def dedup(seq):
-    """Remove duplicates while preserving order of appearance."""
-    seen, out = set(), []
-    for x in seq:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out
-
-
-def as_list(v, fallback):
-    """Normalize a scalar/list/None to a non-empty, deduplicated list."""
-    if v is None:
-        items = []
-    elif isinstance(v, (list, tuple)):
-        items = list(v)
-    else:
-        items = [v]
-    items = dedup(items)
-    return items or list(fallback)
 
 
 def combo_label(c):
@@ -271,10 +241,6 @@ def run_yolo_benchmark(images, models, runs=5, conf=0.25, imgsz=640, device=None
         json.dump(payload, f, indent=2, ensure_ascii=False)
     print(f"\n[OK] Saved to {out}")
     return results
-
-
-def _float_list(values):
-    return [float(v) for v in values]
 
 
 def main():

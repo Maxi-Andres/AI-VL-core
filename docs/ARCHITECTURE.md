@@ -282,7 +282,7 @@ Design rules:
 - **Backpressure:** the frame bus is bounded (`maxsize` small); if YOLO falls behind, oldest
   frames are dropped — we want *fresh* detections, not a growing lag.
 - **Reuse:** both consumers call the **existing** functions unchanged — `run_detection`
-  (`src/yolo_common.py:212`) and `query_vlm` (`src/vlm_common.py:440`). The model cache in
+  (`src/yolo_common.py`) and `query_vlm` (`src/vlm_common.py`). The model cache in
   `yolo_common` already keeps the YOLO weights loaded in-process; Ollama keeps the VLM warm
   (see the warm-up notes in `FIX.txt`).
 
@@ -475,7 +475,7 @@ The `objects[]` element is **byte-for-byte the existing contract** from `vlm_com
 
 | Phase | Goal | What gets added |
 |---|---|---|
-| **0. HTTP wrapper** | Inference reachable over the network | FastAPI app wrapping `run_detection` and `query_vlm` behind `POST /detect` / `POST /ask` (single image in, `objects[]` out). Proves the core works as a service. |
+| **0. HTTP wrapper** | Inference reachable over the network | FastAPI app wrapping `run_detection` and `query_vlm` behind `POST /detect` / `POST /vlm` (single image in, `objects[]` out). Proves the core works as a service. |
 | **1. Single-frame WS loop** | Browser camera → backend → overlay | `getUserMedia` page (React+Tailwind+TS), binary-frame WS up, run YOLO per frame, detections JSON down, canvas overlay. Phone-as-camera works end to end. |
 | **2. Hybrid 30/1 pipeline** | Real-time + slow path together | `asyncio` frame bus + two consumers (§5); YOLO every frame, VLM ~1/sec; backpressure + latest-frame slot. Measure VRAM contention with `ollama ps`. |
 | **3. Persistence + telemetry** | Store + show robot state | Redis (hot telemetry + pub/sub fan-out), MongoDB (detections/chat/events), frames to FS/MinIO with refs. `<TelemetryPanel>` driven by WS. |
@@ -511,10 +511,10 @@ phone.
 
 | Symbol | Location | Role |
 |---|---|---|
-| `query_vlm(...)` | `src/vlm_common.py:440` | Streaming Ollama `/api/chat` client → `objects[]` |
-| `run_detection(...)` | `src/yolo_common.py:212` | In-process Ultralytics detector → `objects[]` |
-| `run_vlm_scan(...)` | `src/vlm_scan.py:36` | Single-image VLM entrypoint (reference) |
-| `run_yolo_scan(...)` | `src/yolo_scan.py:36` | Single-image YOLO entrypoint (reference) |
+| `query_vlm(...)` | `src/vlm_common.py` | Streaming Ollama `/api/chat` client → `objects[]` |
+| `run_detection(...)` | `src/yolo_common.py` | In-process Ultralytics detector → `objects[]` |
+| `run_vlm_scan(...)` | `src/vlm_scan.py` | Single-image VLM entrypoint (reference) |
+| `run_yolo_scan(...)` | `src/yolo_scan.py` | Single-image YOLO entrypoint (reference) |
 | `objects[]` contract | `vlm_common` / `yolo_common` | `{type, description, reading, confidence, bbox(0..1)}` |
 | `config.json` | repo root | Shared VLM+YOLO config (model, scope, conf, imgsz, url, …) |
 | `results/` | repo root | Existing output convention; reuse for frame storage |

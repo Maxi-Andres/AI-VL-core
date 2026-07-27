@@ -50,60 +50,27 @@ from vlm_common import (
     OLLAMA_HOST,
     PROMPT_VARIANTS,
     SCOPES,
+    as_list,
+    dedup,
     encode_image,
     fmt_secs,
     image_size,
     list_images,
     load_config,
     model_supports_thinking,
+    pctl,
     progress_bar,
     query_vlm,
     results_path,
 )
 
 
-def pctl(values, p):
-    if not values:
-        return float("nan")
-    s = sorted(values)
-    k = (len(s) - 1) * (p / 100.0)
-    f = int(k)
-    c = min(f + 1, len(s) - 1)
-    return s[f] + (s[c] - s[f]) * (k - f)
-
-
-def dedup(seq):
-    """Remove duplicates while preserving order of appearance."""
-    seen, out = set(), []
-    for x in seq:
-        if x not in seen:
-            seen.add(x)
-            out.append(x)
-    return out
-
-
-def as_list(v, fallback):
-    """Normalize a value (scalar or list) to a non-empty, deduplicated list.
-
-    This lets the sweep dimensions (max_tokens, num_ctx, think) accept either a
-    single value or a list. If it ends up empty, use `fallback` (a list).
-    """
-    if v is None:
-        items = []
-    elif isinstance(v, (list, tuple)):
-        items = list(v)
-    else:
-        items = [v]
-    items = dedup(items)
-    return items or list(fallback)
-
-
 def parse_bool(s):
-    """Convert 'true/false/on/off/1/0/yes/no/si' (or a bool) to bool. None if not understood."""
+    """Convert 'true/false/on/off/1/0/yes/no' (or a bool) to bool. None if not understood."""
     if isinstance(s, bool):
         return s
     t = str(s).strip().lower()
-    if t in ("true", "on", "1", "yes", "si", "sí", "y"):
+    if t in ("true", "on", "1", "yes", "y"):
         return True
     if t in ("false", "off", "0", "no", "n"):
         return False

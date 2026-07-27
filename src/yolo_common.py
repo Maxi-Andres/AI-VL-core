@@ -37,11 +37,14 @@ from datetime import datetime
 # config.json, a single results/ folder and identical progress bars/timers.
 from vlm_common import (  # noqa: F401  (re-exported for the YOLO entry points)
     PROJECT_ROOT,
+    as_list,
+    dedup,
     fmt_secs,
     image_size,
     list_images,
     load_config as _load_base_config,
     natural_key,
+    pctl,
     progress_bar,
     results_path,
     save_config,

@@ -22,3 +22,9 @@ faster-whisper>=1.0
 # without this. Needs >=1.3 on modern Python (3.12+): 1.2.x pins piper-phonemize,
 # which has no wheels there.
 piper-tts>=1.3
+
+# Second (nicer) TTS engine: Kokoro (82M-param ONNX, CPU, offline). Runs on the
+# same onnxruntime as YOLO; phonemization ships in-process via espeakng-loader, so
+# no system espeak-ng is required. The installer downloads the model files into
+# kokoro_models/. Optional — Piper and browser voices work without it.
+kokoro-onnx>=0.4
