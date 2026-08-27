@@ -44,14 +44,14 @@ from fastapi import FastAPI, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel
 from PIL import Image
+from pydantic import BaseModel
 
-import yolo_common
-import vlm_common
-import command_common
 import asr_common
+import command_common
 import tts_common
+import vlm_common
+import yolo_common
 
 app = FastAPI(title="iacore — inference service")
 
@@ -286,13 +286,12 @@ async def vlm_stream(req: VlmStreamRequest):
 
     def gen():
         try:
-            for piece in vlm_common.query_vlm_stream(
+            yield from vlm_common.query_vlm_stream(
                 b64, model, prompt,
                 max_tokens=req.max_tokens,
                 num_ctx=req.num_ctx,
                 url=OLLAMA_URL,
-            ):
-                yield piece
+            )
         except Exception as e:
             # Surface the error inline so the client sees why the stream stopped.
             yield f"\n[error] {e}"

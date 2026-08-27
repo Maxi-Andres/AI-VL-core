@@ -32,6 +32,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src
 
 import requests
 
+from vlm_benchmark import run_benchmark
 from vlm_common import (
     PROMPT_VARIANTS,
     SCOPES,
@@ -40,19 +41,23 @@ from vlm_common import (
     model_supports_thinking,
     save_config,
 )
+from vlm_scan import run_vlm_scan
+from yolo_benchmark import run_yolo_benchmark
+
 # yolo_common.load_config is a superset of the VLM one: it loads the shared
 # config.json AND fills in the YOLO-only defaults, so the single menu can drive
 # both paths off one config object.
 from yolo_common import (
     class_names as yolo_class_names,
+)
+from yolo_common import (
     list_models as list_yolo_models,
+)
+from yolo_common import (
     load_config,
     ultralytics_available,
 )
-from vlm_scan import run_vlm_scan
-from vlm_benchmark import run_benchmark
 from yolo_scan import run_yolo_scan
-from yolo_benchmark import run_yolo_benchmark
 
 
 # --------------------------------------------------------------------------- #
@@ -63,7 +68,7 @@ def ask(prompt):
         return input(prompt).strip()
     except (EOFError, KeyboardInterrupt):
         print("\nBye!")
-        raise SystemExit(0)
+        raise SystemExit(0) from None
 
 
 def list_ollama_models(url):
@@ -229,8 +234,8 @@ def toggle_think(cfg, key="think", models=None):
     if thinkers:
         print(f"   NOTE: {', '.join(thinkers)} reason(s) by design (qwen3-vl). On Ollama "
               f"0.30.6 the think=OFF flag does NOT turn it off: they will reason anyway.")
-        print(f"   The REAL switch is the model: if you do NOT want it to think, use one "
-              f"without 'thinking' (e.g. qwen2.5vl:7b).")
+        print("   The REAL switch is the model: if you do NOT want it to think, use one "
+              "without 'thinking' (e.g. qwen2.5vl:7b).")
     if nonthinkers:
         print(f"   {', '.join(nonthinkers)} has/have no 'thinking': never reason(s), "
               f"truly OFF.")

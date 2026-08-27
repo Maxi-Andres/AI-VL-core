@@ -742,7 +742,7 @@ def fmt_secs(s):
         return "  -  "
     if s < 60:
         return f"{s:.1f}s"
-    m, sec = divmod(int(round(s)), 60)
+    m, sec = divmod(round(s), 60)
     return f"{m}m{sec:02d}s"
 
 
@@ -754,7 +754,7 @@ def progress_bar(done, total, suffix="", width=24):
     """
     total = max(total, 1)
     frac = min(done / total, 1.0)
-    filled = int(round(width * frac))
+    filled = round(width * frac)
     bar = "█" * filled + "░" * (width - filled)
     line = f"\r  [{bar}] {frac * 100:5.1f}% ({done}/{total})"
     if suffix:

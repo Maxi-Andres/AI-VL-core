@@ -42,14 +42,15 @@ from vlm_common import (  # noqa: F401  (re-exported for the YOLO entry points)
     fmt_secs,
     image_size,
     list_images,
-    load_config as _load_base_config,
     natural_key,
     pctl,
     progress_bar,
     results_path,
     save_config,
 )
-
+from vlm_common import (
+    load_config as _load_base_config,
+)
 
 # --------------------------------------------------------------------------- #
 # Lazy ultralytics import
@@ -168,7 +169,7 @@ def list_models(extra_dirs=None):
     preserved.
     """
     found = []
-    dirs = [PROJECT_ROOT, os.getcwd()] + list(extra_dirs or [])
+    dirs = [PROJECT_ROOT, os.getcwd(), *list(extra_dirs or [])]
     seen_dirs = set()
     for d in dirs:
         d = os.path.abspath(d)
@@ -239,7 +240,9 @@ def result_to_objects(result):
     xyxyn = boxes.xyxyn.tolist()       # normalized [x_min, y_min, x_max, y_max]
     confs = boxes.conf.tolist()
     classes = boxes.cls.tolist()
-    for bb, cf, cl in zip(xyxyn, confs, classes):
+    # strict=: the three lists come from the same `boxes`, so a length mismatch would be
+    # an ultralytics contract change we want to hear about loudly, not silently truncate.
+    for bb, cf, cl in zip(xyxyn, confs, classes, strict=True):
         label = names.get(int(cl), str(int(cl)))
         objects.append({
             "type": label,

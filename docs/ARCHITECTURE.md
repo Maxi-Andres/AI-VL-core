@@ -518,4 +518,3 @@ phone.
 | `objects[]` contract | `vlm_common` / `yolo_common` | `{type, description, reading, confidence, bbox(0..1)}` |
 | `config.json` | repo root | Shared VLM+YOLO config (model, scope, conf, imgsz, url, …) |
 | `results/` | repo root | Existing output convention; reuse for frame storage |
-

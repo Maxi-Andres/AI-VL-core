@@ -29,12 +29,9 @@ place and both the prompt and the validation pick it up. The executor-facing
 numbers (speed presets, arm action IDs) live here too so Phase 2 has one place to
 read.
 """
-import json
 import time
 
-import vlm_common
-from vlm_common import extract_json, model_supports_thinking, OLLAMA_HOST, stream_chat
-
+from vlm_common import OLLAMA_HOST, extract_json, model_supports_thinking, stream_chat
 
 # --------------------------------------------------------------------------- #
 # Executor-facing constants (read by the Phase 2 skill executor, not by the LLM)
@@ -842,7 +839,7 @@ def interpret(text, model, robot=DEFAULT_ROBOT, image_b64=None, url=OLLAMA_HOST,
         payload["think"] = False
 
     t0 = time.perf_counter()
-    content, reasoning, done_reason, in_tok, out_tok = stream_chat(
+    content, _reasoning, _done_reason, in_tok, out_tok = stream_chat(
         payload, url=url, timeout=timeout)
     elapsed = time.perf_counter() - t0
 
