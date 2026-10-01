@@ -301,11 +301,11 @@ G1_SKILLS = {
         "examples": ["zero torque", "release the motors", "power down the joints"],
     },
     "start": {
-        "label": "Main operation (1-DoF waist)",
-        "desc": "FSM 500 [sdk] — the app's Main Operation Control (controller R1+X): "
-                "the normal walking controller for the 1-DoF-waist G1. On a "
-                "3-DoF-waist robot use 'Walk mode (3-DoF waist)' (501) instead — 500 "
-                "is reported to jitter there.",
+        "label": "Walk mode (waist locked)",
+        "desc": "FSM 500 [robot: confirmed off the wire 2026-10-01] — the app's Walk with "
+                "the waist LOCKED (1-DoF). With the waist free use 'Walk mode (3-DoF "
+                "waist)' (501) instead. The lock is an app setting; the relay offers "
+                "only the walk that matches it (G1_WAIST_LOCK in its relay.env).",
         "params": {},
         "examples": ["start", "main operation", "wake up"],
     },
