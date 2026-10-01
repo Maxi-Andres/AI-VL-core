@@ -147,6 +147,19 @@ ARM_ACTION_LABELS = {
     "forward_push": "Forward push",
 }
 
+# Which locomotion mode each arm action needs, as the drive pad groups them. Measured
+# 2026-10-01 over the relay: the app's own actions (FSM 550 + code) play ONLY from Run — from
+# Walk the robot accepts them and does nothing; the arm service's ids (api 7106) played fine
+# from Walk. turn_back_wave is the robot's own restriction (it published fsm 500/501 for it).
+ARM_ACTION_GROUPS = {
+    "Run mode": ["hug", "clap", "face_wave", "left_kiss", "heart", "hands_up", "x_ray",
+                 "right_hand_up", "reject", "shake_hand", "high_five"],
+    "Walk or Run": ["release_arm", "two_hand_kiss", "right_kiss", "right_heart", "high_wave",
+                    "box_win_left", "box_win_right", "box_win_both", "hand_on_heart",
+                    "hands_up_right", "forward_push"],
+    "Walk mode": ["turn_back_wave"],
+}
+
 # The named dance/teach actions, labelled for the UI.
 CUSTOM_ACTION_LABELS = {
     "Waist_Drum_Dance": "Waist drum dance",
@@ -388,12 +401,13 @@ G1_SKILLS = {
     # --- Arm preset actions (G1ArmActionClient.ExecuteAction) -------------- #
     "arm_action": {
         "label": "Arm action",
-        "desc": "Perform a preset upper-body arm gesture chosen by name. Needs the "
-                "robot in Run mode: from Walk the robot accepts it and does nothing "
-                "(read off the bus 2026-10-01).",
+        "desc": "Perform a preset upper-body arm gesture chosen by name. Each one needs "
+                "a locomotion mode — Run for the app's own actions, Walk or Run for the "
+                "rest (see the groups; measured 2026-10-01).",
         "params": {
             "action": {"values": list(ARM_ACTION_IDS.keys()),
-                       "labels": ARM_ACTION_LABELS, "default": "release_arm"},
+                       "labels": ARM_ACTION_LABELS, "groups": ARM_ACTION_GROUPS,
+                       "default": "release_arm"},
         },
         "examples": ["put your hands up", "clap", "give me a high five", "give me a hug",
                      "make a heart", "blow a kiss", "cross your arms to say no",
