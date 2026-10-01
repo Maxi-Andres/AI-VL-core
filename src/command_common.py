@@ -127,7 +127,7 @@ ARM_ACTION_LABELS = {
     "left_kiss": "Left kiss",
     "right_kiss": "Right kiss",
     "hands_up": "Hands up",
-    "clap": "Clap",
+    "clap": "High five clap",   # the app's name for it (2026-10-01)
     "high_five": "High five",
     "hug": "Hug",
     "heart": "Arm heart",
@@ -389,7 +389,8 @@ G1_SKILLS = {
     "arm_action": {
         "label": "Arm action",
         "desc": "Perform a preset upper-body arm gesture chosen by name. Needs the "
-                "Preparation state (FSM 500).",
+                "robot in Run mode: from Walk the robot accepts it and does nothing "
+                "(read off the bus 2026-10-01).",
         "params": {
             "action": {"values": list(ARM_ACTION_IDS.keys()),
                        "labels": ARM_ACTION_LABELS, "default": "release_arm"},
