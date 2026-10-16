@@ -29,12 +29,19 @@ the browser never talks to iacore directly. Endpoints:
 
 Run (from the iacore repo root, venv active):
     uvicorn service:app --host 0.0.0.0 --port 8001
-Config via env: IACORE_PORT (informational), OLLAMA_URL (defaults to config.json).
+Config via env: IACORE_PORT (informational), OLLAMA_URL (defaults to config.json),
+VLM_BACKEND ("ollama" | "llamacpp", overrides config.json's vlm_backend), VLM_URL
+(the llama-server's address; defaults to config.json's llamacpp_url) and IACORE_WARM_UP
+("0" skips loading speech and the VLM at startup; see _warm_up).
 """
 import base64
 import io
+import logging
 import os
 import sys
+import threading
+import time
+from contextlib import asynccontextmanager
 
 # The detection logic lives in src/ within THIS repo (a local file import, not a
 # cross-app dependency). Put it on the path like menu.py does.
@@ -53,7 +60,15 @@ import tts_common
 import vlm_common
 import yolo_common
 
-app = FastAPI(title="iacore — inference service")
+
+@asynccontextmanager
+async def _lifespan(_app):
+    if os.environ.get("IACORE_WARM_UP", "1") != "0":
+        threading.Thread(target=_warm_up, name="warm-up", daemon=True).start()
+    yield
+
+
+app = FastAPI(title="iacore — inference service", lifespan=_lifespan)
 
 # The backend is the normal caller, but allow any origin: this service is meant to
 # sit on an internal network behind the backend gateway anyway.
@@ -66,6 +81,54 @@ app.add_middleware(
 
 CFG = yolo_common.load_config()
 OLLAMA_URL = os.environ.get("OLLAMA_URL", CFG.get("url", vlm_common.OLLAMA_HOST))
+LLAMACPP_URL = os.environ.get("VLM_URL", CFG.get("llamacpp_url", vlm_common.LLAMACPP_HOST))
+
+
+def vlm_url():
+    """Where VLM requests go: the llama-server or Ollama, per vlm_common.vlm_backend()."""
+    return LLAMACPP_URL if vlm_common.vlm_backend() == "llamacpp" else OLLAMA_URL
+
+
+def _warm_up():
+    """Pay, at startup, what the first spoken question would otherwise wait for.
+
+    Measured 2026-10-16: loading Whisper took 3.3 s on the first /transcribe, Piper 1.2 s
+    on the first /speak, and the first request to llama-server 4.3 s (CUDA kernels built on
+    first use) — a fresh app took ~9 s to answer its first question and ~1 s afterwards.
+    One throwaway round of each, in a background thread so /health answers meanwhile.
+    Best effort: a missing voice or a VLM that is down only costs that step.
+    """
+    log = logging.getLogger("uvicorn.error")
+    t0 = time.perf_counter()
+    done = []
+    clip = None
+    try:
+        clip = tts_common.synthesize("Hola.")["wav"]
+        done.append("voice")
+    except Exception as e:
+        log.warning("warm-up: text-to-speech skipped (%s)", e)
+    try:
+        if clip:
+            asr_common.transcribe(clip, language="es")
+        else:
+            asr_common.load_model()
+        done.append("speech-to-text")
+    except Exception as e:
+        log.warning("warm-up: speech-to-text skipped (%s)", e)
+    try:
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 64), (128, 128, 128)).save(buf, "JPEG")
+        img = base64.b64encode(buf.getvalue()).decode()
+        for _ in vlm_common.query_vlm_stream(img, CFG.get("model", "qwen3-vl:4b"), "Hi",
+                                             max_tokens=1, num_ctx=CFG.get("num_ctx", 4096),
+                                             url=vlm_url()):
+            pass
+        done.append(f"VLM ({vlm_common.vlm_backend()})")
+    except Exception as e:
+        log.warning("warm-up: VLM skipped (%s)", e)
+    log.info("warm-up: %s ready in %.1f s", ", ".join(done) or "nothing",
+             time.perf_counter() - t0)
+
 
 
 # --------------------------------------------------------------------------- #
@@ -111,9 +174,12 @@ def _decode(data):
     return Image.open(io.BytesIO(data)).convert("RGB")
 
 
-def _list_ollama_models():
-    """Installed Ollama models via /api/tags; [config default] on failure."""
+def _list_vlm_models():
+    """The models the VLM backend offers: llama-server's one (its alias), or the
+    installed Ollama models via /api/tags; [config default] on failure."""
     import requests
+    if vlm_common.vlm_backend() == "llamacpp":
+        return vlm_common.list_llamacpp_models(LLAMACPP_URL) or [CFG.get("model", "qwen3-vl:4b")]
     try:
         host = vlm_common.host_of(OLLAMA_URL)
         r = requests.get(f"{host}/api/tags", timeout=5)
@@ -140,14 +206,15 @@ def options():
     }
     return {
         "yolo_models": yolo_common.list_models(),
-        "vlm_models": _list_ollama_models(),
+        "vlm_models": _list_vlm_models(),
         "scopes": scopes,
         "defaults": {
             "yolo_model": CFG.get("yolo_model", "yolov8n.pt"),
             "conf": CFG.get("yolo_conf", 0.25),
             "imgsz": CFG.get("yolo_imgsz", 640),
             "classes": CFG.get("yolo_classes", []),
-            "vlm_model": CFG.get("model", "qwen3-vl:4b"),
+            "vlm_model": _list_vlm_models()[0] if vlm_common.vlm_backend() == "llamacpp"
+            else CFG.get("model", "qwen3-vl:4b"),
             "scope": CFG.get("scope", "industrial"),
             "variant": CFG.get("variant", "v1_original"),
         },
@@ -219,7 +286,7 @@ async def vlm(req: VlmRequest):
             num_ctx=req.num_ctx,
             think=req.think,
             prompt=req.prompt,
-            url=OLLAMA_URL,
+            url=vlm_url(),
             size=size,
         )
 
@@ -290,7 +357,7 @@ async def vlm_stream(req: VlmStreamRequest):
                 b64, model, prompt,
                 max_tokens=req.max_tokens,
                 num_ctx=req.num_ctx,
-                url=OLLAMA_URL,
+                url=vlm_url(),
             )
         except Exception as e:
             # Surface the error inline so the client sees why the stream stopped.
@@ -323,7 +390,7 @@ async def command(req: CommandRequest):
             text, model,
             robot=req.robot,
             image_b64=b64 or None,
-            url=OLLAMA_URL,
+            url=vlm_url(),
             num_ctx=req.num_ctx,
             max_tokens=req.max_tokens,
         )

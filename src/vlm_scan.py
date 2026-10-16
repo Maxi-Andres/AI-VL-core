@@ -18,6 +18,7 @@ Usage:
     python3 src/vlm_scan.py fotos/clean/2.jpeg --scope all --think
 """
 import argparse
+import os
 import sys
 
 import requests
@@ -75,6 +76,9 @@ def run_vlm_scan(image, model, scope="industrial", max_tokens=8192,
 
 
 def main():
+    # An Ollama tool (its model tags, its /api/tags): config.json's vlm_backend is the APP's
+    # server. VLM_BACKEND=llamacpp, with that server as the url, points this at it instead.
+    os.environ.setdefault("VLM_BACKEND", "ollama")
     cfg = load_config()  # defaults come from config.json
     ap = argparse.ArgumentParser(description="VLM scan on a single image.")
     ap.add_argument("image", nargs="?", default=cfg["image"],

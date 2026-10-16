@@ -801,6 +801,9 @@ PATH_MENU = """
 
 
 def main():
+    # An Ollama tool (its model tags, its /api/tags): config.json's vlm_backend is the APP's
+    # server. VLM_BACKEND=llamacpp, with that server as the url, points this at it instead.
+    os.environ.setdefault("VLM_BACKEND", "ollama")
     cfg = load_config()
 
     while True:

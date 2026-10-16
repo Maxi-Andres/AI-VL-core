@@ -7,6 +7,8 @@ venv/
 
 # Benchmark results (regenerated; only the folder is versioned)
 results/*.json
+# llama-server logs written by src/vlm_server_benchmark.py
+results/*.log
 
 # Annotated (boxed) images saved by the YOLO scan
 results/annotated/
@@ -19,3 +21,7 @@ piper_voices/
 
 # Kokoro TTS model files (downloaded by the installer; ~340 MB)
 kokoro_models/
+
+# VLM weights for llama-server (GGUF model + vision projector; downloaded by the installer,
+# several GB each)
+vlm_models/

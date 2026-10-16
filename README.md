@@ -92,6 +92,60 @@ even handles platforms whose `venv` lacks `ensurepip` (it bootstraps `pip` via
   (`ollama pull qwen3-vl:4b`, etc.).
 - Verify it's alive: `curl http://localhost:11434/api/version`
 - Verify the model loads **100% on GPU**: `ollama ps` (see the VRAM note below).
+- For the app's VLM, a **llama-server** with the GGUF files in `vlm_models/` (next
+  section). `linux/install.sh` downloads them and `linux/run.sh` starts the server; the
+  binary is the one Ollama ships, so nothing else is installed.
+
+## Serving the VLM with llama-server (the app's default since 2026-10-16)
+
+Ollama 0.30.6 runs Qwen3-VL's **vision encoder on the CPU**: it starts its own
+llama-server with `--no-mmproj-offload`, whatever the model or the free VRAM. On the RTX
+5060 a 768 px photo then costs ~6.5 s before the first word, with the GPU idle — most of
+the ~10 s a spoken question took. The same model under a llama-server we start ourselves
+keeps the encoder on the GPU. Measured with `src/vlm_server_benchmark.py` (768 px frames,
+like the browser sends; a fresh frame per request so no cache helps):
+
+| served by | model | first word | full answer | facts right | commands right | VRAM |
+|---|---|---:|---:|---:|---:|---:|
+| Ollama | `qwen3-vl:4b-instruct` | 6.81 s | 7.34 s | 8/8 | 8/8 | 3.2 GB |
+| llama-server | Qwen3-VL 4B Q4_K_M | 0.18 s | 0.79 s | 7/8 | 8/8 | 4.4 GB |
+| llama-server | same, `--image-min-tokens 1024` | **0.60 s** | **1.22 s** | **8/8** | **8/8** | 4.5 GB |
+
+Every other candidate that could run on the 8 GB card, same benchmark (facts / commands out
+of 8; "first word" and "answer" are means over 6 fresh frames):
+
+| model | first word | answer | facts | commands | VRAM | verdict |
+|---|---:|---:|---:|---:|---:|---|
+| Qwen3-VL 2B Q8 | 0.13 s | 0.49 s | 6 | 7 | 3.6 GB | "levantate" → `lie_up`; detection JSON never ends |
+| Qwen3-VL 4B Q8, 1024 tokens | 0.57 s | 1.61 s | 8 | 8 | 6.2 GB | as good, but no room left for YOLO |
+| Qwen3-VL 8B Q4 | — | — | — | — | — | out of memory; with 26 of 36 layers on the GPU, 16 tok/s and 5-11 s per answer |
+| Gemma 3 4B | 0.69 s | 1.06 s | 7 | 7 | 3.9 GB | **"pará" → `walk`**, answers in English |
+| InternVL3 8B Q4 | 0.52 s | 1.24 s | 6 | 8 | 5.1 GB | fits, but misreads and detects 10 of ~24 objects |
+| MiniCPM-V 4.5 Q4 | — | — | 5 | 0 | 5.1 GB | answers come back empty (it reasons); needs layers on the CPU |
+| SmolVLM2 2.2B | 0.56 s | 1.12 s | 3 | 2 | 3.4 GB | too weak |
+
+The token floor matters for small print: Ollama forces 1024 tokens per image, while the
+model's own floor turns a 768 px frame into ~430, and the brand on an instrument's
+nameplate is then misread. So the default keeps Ollama's 1024.
+
+How it is wired:
+
+- `config.json`: `vlm_backend` = `"llamacpp"` turns it on; `llamacpp_model`,
+  `llamacpp_mmproj`, `llamacpp_alias`, `llamacpp_repo` and `llamacpp_image_min_tokens`
+  pick what is served (defaults in `src/vlm_common.py`). The env `VLM_BACKEND` overrides
+  it, so `VLM_BACKEND=ollama ./run.sh` goes back to Ollama.
+- `../linux/vlm-server.sh` starts the server on `127.0.0.1:8081`; `../linux/run.sh` runs
+  it with the app and stops it with the app, so its VRAM is only held while the app runs.
+  If it does not come up, `run.sh` falls back to Ollama.
+- `vlm_common` translates the Ollama-style payloads into llama-server's
+  `/v1/chat/completions`, so detection, the free-prompt stream and the command
+  interpreter all work on either backend.
+- At startup `service.py` warms up Whisper, Piper and the VLM in the background, so the
+  first question does not pay ~9 s of loading.
+
+Comparing candidate models: `python3 src/vlm_server_benchmark.py --list` shows which GGUF
+files are present; `python3 src/vlm_server_benchmark.py --ollama qwen3-vl:4b-instruct`
+runs every present model plus Ollama as the "before" row.
 
 ## Models (Ollama)
 

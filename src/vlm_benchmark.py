@@ -322,6 +322,9 @@ def run_benchmark(images, models, runs=3, scope="industrial", max_tokens=4096,
 
 
 def main():
+    # An Ollama tool (its model tags, its /api/tags): config.json's vlm_backend is the APP's
+    # server. VLM_BACKEND=llamacpp, with that server as the url, points this at it instead.
+    os.environ.setdefault("VLM_BACKEND", "ollama")
     cfg = load_config()  # defaults come from config.json (benchmark_* keys)
     ap = argparse.ArgumentParser(description="VLM latency/JSON benchmark and prompt A/B testing.")
     ap.add_argument("folder", nargs="?", default=cfg["folder"],

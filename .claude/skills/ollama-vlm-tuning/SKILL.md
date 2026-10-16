@@ -16,6 +16,27 @@ This is consult-on-demand knowledge that used to live in `CLAUDE.md`. The always
 rules (English-only, never-commit, the app boundary, the JSON contract) stay in
 `CLAUDE.md`; the deep tuning knowledge lives here.
 
+## Ollama runs the vision encoder on the CPU — the app uses llama-server (2026-10-16)
+
+Ollama 0.30.6 starts its llama-server with `--no-mmproj-offload --image-min-tokens 1024`
+("CLIP using CPU backend" in its log): ~6.5 s per 768 px photo before the first word,
+GPU at 1-2 %. No Ollama setting changes it, and importing the official GGUF with
+`ollama create` does not either. The app therefore serves the VLM with
+`linux/vlm-server.sh` (Ollama's own bundled llama-server binary, encoder on the GPU):
+first word ~0.6 s, same answers. Everything below about Ollama still applies to the
+CLI, the old benchmark and the fallback (`VLM_BACKEND=ollama`). For llama-server:
+
+- `vlm_backend`, `llamacpp_*` keys in `config.json` (defaults in `vlm_common.DEFAULT_CONFIG`);
+  `num_ctx` there is the server's `-c` (`VLM_CTX`, 4096), not a per-request option.
+- Keep `llamacpp_image_min_tokens` at 1024 (Ollama's floor): the model's own floor makes a
+  768 px frame ~430 tokens and small print (nameplates) gets misread.
+- `format: json` becomes a compact-JSON GBNF grammar; Ollama's sampling defaults
+  (repeat_penalty 1.1, top_k 40, top_p 0.9) are sent explicitly or long lists loop.
+- Both servers cache image embeddings: benchmark with a different frame each request
+  (`src/vlm_server_benchmark.py` changes one pixel), or the second run is a lie.
+- VRAM: llama-server holds the projector on the GPU too, ~1.2 GB more than Ollama for
+  the same 4B Q4 (4.4 vs 3.2 GB).
+
 ## Model / hardware constraint (important)
 
 The scan default is `qwen3-vl:4b` (not 8b) because of VRAM. On an 8 GB GPU (e.g.

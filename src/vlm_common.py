@@ -4,7 +4,7 @@ vlm_common.py — Core shared by the menu, the smoke test and the benchmark.
 
 This is the single place (to avoid duplication) that holds:
   - The detection MODES (prompts) -> SCOPES
-  - The VLM client against Ollama's NATIVE endpoint (/api/chat)
+  - The VLM client: Ollama's NATIVE endpoint (/api/chat), or llama-server (see below)
   - Robust JSON parsing + bounding box normalization
   - The persistent config in config.json
 
@@ -19,6 +19,24 @@ budget thinking, `content` comes back EMPTY and there is no JSON.
 The native endpoint (/api/chat) separates the reasoning (field `thinking`) from
 the answer (field `content`), so the JSON comes out clean and we can also
 print live what the model is thinking.
+
+The llama-server backend (vlm_backend = "llamacpp", since 2026-10-16)
+---------------------------------------------------------------------------
+Ollama 0.30.6 runs the vision encoder of qwen3-vl ON THE CPU: it starts its
+llama-server with --no-mmproj-offload and --image-min-tokens 1024, whatever the
+model or the free VRAM ("CLIP using CPU backend" in its log). Measured on the RTX
+5060: 6.4 s just to look at a 768 px photo, GPU at 1-2 % meanwhile — most of the
+~10 s a spoken question took. The same model under llama-server with the encoder on
+the GPU: 0.5 s in total. So the VLM can be served by a llama-server that
+linux/run.sh starts with the app; set vlm_backend to "llamacpp" (config.json or the
+VLM_BACKEND env) and point llamacpp_url at it.
+
+That server speaks the OpenAI-compatible /v1/chat/completions. The caveat above
+does not bite there: llama-server returns any reasoning in its own
+`reasoning_content` field, separate from `content`, and the models we serve with it
+are Instruct checkpoints that do not reason anyway. The callers keep building
+Ollama-style payloads; _openai_payload() translates them, so every entry point (the
+detection scan, the free-prompt stream, the command interpreter) works on both.
 """
 import base64
 import glob
@@ -33,6 +51,19 @@ import requests
 # Ollama base host. /api/chat and /api/tags are appended to it.
 # Can be overridden via config.json or --url (also accepts old URLs with /v1).
 OLLAMA_HOST = "http://localhost:11434"
+
+# llama-server, when vlm_backend is "llamacpp" (see the module docstring).
+LLAMACPP_HOST = "http://127.0.0.1:8081"
+
+
+def vlm_backend():
+    """Which server answers VLM requests: "ollama" (default) or "llamacpp".
+
+    VLM_BACKEND in the environment wins over config.json's vlm_backend, so the
+    launcher can fall back to Ollama when it could not start llama-server.
+    """
+    b = os.environ.get("VLM_BACKEND") or load_config().get("vlm_backend") or "ollama"
+    return b.strip().lower()
 
 # Image extensions the benchmark recognizes when scanning a folder.
 IMG_EXTS = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp")
@@ -133,6 +164,8 @@ def model_capabilities(model, url=OLLAMA_HOST):
 
     If it cannot be queried (server down, nonexistent model), returns an empty set.
     """
+    if vlm_backend() == "llamacpp":
+        return set()               # no /api/show there; we serve Instruct checkpoints
     key = (host_of(url), model)
     if key in _CAPS_CACHE:
         return _CAPS_CACHE[key]
@@ -397,6 +430,17 @@ DEFAULT_CONFIG = {
     "num_ctx": 16384,                  # context window (input+output); the one `ollama ps` shows
     "think": True,                     # model reasoning (in qwen3-vl it cannot really be turned off; better to watch it)
     "url": OLLAMA_HOST,                # Ollama host
+    "vlm_backend": "ollama",           # "ollama" or "llamacpp" (llama-server, vision on the GPU)
+    "llamacpp_url": LLAMACPP_HOST,     # where linux/run.sh starts llama-server
+    # The model linux/vlm-server.sh serves (paths relative to the repo; linux/install.sh
+    # downloads them) and how many tokens a photo may shrink to. Picked by
+    # src/vlm_server_benchmark.py; 1024 is Ollama's floor, which reads small print that
+    # the model's own (~430 tokens for a 768 px frame) misses.
+    "llamacpp_model": "vlm_models/Qwen3VL-4B-Instruct-Q4_K_M.gguf",
+    "llamacpp_mmproj": "vlm_models/mmproj-Qwen3VL-4B-Instruct-F16.gguf",
+    "llamacpp_alias": "qwen3vl-4b-q4",
+    "llamacpp_repo": "Qwen/Qwen3-VL-4B-Instruct-GGUF",   # where install.sh gets both files
+    "llamacpp_image_min_tokens": 1024,
 
     # --- Benchmark: has its OWN config, independent of the smoke test ---------
     # This way you can run the benchmark with a lighter (faster) context without
@@ -499,7 +543,12 @@ def normalize_bboxes(parsed, size):
     w, h = size
     if not w or not h:
         return parsed
-    for obj in parsed.get("objects", []):
+    objects = parsed.get("objects")
+    # Valid JSON is not the contract: a model has answered "objects": ["person", ...]
+    # (qwen3-vl 4B Q8, 2026-10-16), which crashed here with a 500 on /vlm.
+    for obj in objects if isinstance(objects, list) else []:
+        if not isinstance(obj, dict):
+            continue
         bb = obj.get("bbox")
         if (isinstance(bb, list) and len(bb) == 4
                 and all(isinstance(v, (int, float)) for v in bb)
@@ -536,6 +585,104 @@ def extract_json(text):
 
 
 # --------------------------------------------------------------------------- #
+# llama-server (OpenAI-compatible) translation — see the module docstring
+# --------------------------------------------------------------------------- #
+# JSON with at most one space between tokens: no newlines, no indentation. A plain
+# json_object response format let the model pretty-print, and the indentation cost so
+# many tokens that a 30-object detection Ollama returned in 1652 tokens did not fit in
+# 2000 (2026-10-16). Ollama's own format:"json" is compact the same way.
+_COMPACT_JSON_GBNF = r"""
+root   ::= object
+value  ::= object | array | string | number | "true" | "false" | "null"
+object ::= "{" ( string ":" ws value ( "," ws string ":" ws value )* )? "}"
+array  ::= "[" ( value ( "," ws value )* )? "]"
+string ::= "\"" ( [^"\\\x7F\x00-\x1F] | "\\" ( ["\\/bfnrt] | "u" [0-9a-fA-F]{4} ) )* "\""
+number ::= "-"? ( "0" | [1-9] [0-9]* ) ( "." [0-9]+ )? ( [eE] [-+]? [0-9]+ )?
+ws     ::= " "?
+"""
+
+
+def _openai_payload(payload):
+    """An Ollama /api/chat payload as a llama-server /v1/chat/completions one."""
+    messages = []
+    for m in payload.get("messages", []):
+        images = m.get("images") or []
+        if images:
+            content = [{"type": "image_url",
+                        "image_url": {"url": "data:image/jpeg;base64," + b64}} for b64 in images]
+            content.append({"type": "text", "text": m.get("content", "")})
+        else:
+            content = m.get("content", "")
+        messages.append({"role": m["role"], "content": content})
+    opts = payload.get("options", {})
+    out = {
+        "model": payload.get("model", ""),   # informational: llama-server serves one model
+        "messages": messages,
+        "stream": True,
+        "temperature": opts.get("temperature", 0.1),
+        "max_tokens": opts.get("num_predict", 512),
+        "cache_prompt": True,
+        # Ollama's sampling defaults, which llama-server does not apply by itself. Without
+        # the repeat penalty a long object list looped until max_tokens (2026-10-16): the
+        # same detection Ollama finished in 1652 tokens ran past 2000 here.
+        "repeat_penalty": opts.get("repeat_penalty", 1.1),
+        "top_k": opts.get("top_k", 40),
+        "top_p": opts.get("top_p", 0.9),
+    }
+    if payload.get("format") == "json":
+        out["grammar"] = _COMPACT_JSON_GBNF
+    return out
+
+
+def _openai_chunks(payload, url, timeout):
+    """POST to llama-server and yield each streamed chunk (a dict) until [DONE]."""
+    with requests.post(host_of(url) + "/v1/chat/completions", json=_openai_payload(payload),
+                       stream=True, timeout=timeout) as r:
+        r.raise_for_status()
+        for raw in r.iter_lines():
+            line = raw.decode("utf-8", "replace") if isinstance(raw, bytes) else raw
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                return
+            try:
+                yield json.loads(data)
+            except json.JSONDecodeError:
+                continue
+
+
+def _stream_chat_llamacpp(payload, url, timeout):
+    """stream_chat's contract, served by llama-server."""
+    content, reasoning = [], []
+    done_reason = in_tok = out_tok = None
+    for chunk in _openai_chunks(payload, url, timeout):
+        choice = (chunk.get("choices") or [{}])[0]
+        delta = choice.get("delta") or {}
+        if delta.get("content"):
+            content.append(delta["content"])
+        if delta.get("reasoning_content"):
+            reasoning.append(delta["reasoning_content"])
+        if choice.get("finish_reason"):
+            done_reason = choice["finish_reason"]
+        timings = chunk.get("timings") or {}
+        usage = chunk.get("usage") or {}
+        in_tok = usage.get("prompt_tokens", timings.get("prompt_n", in_tok))
+        out_tok = usage.get("completion_tokens", timings.get("predicted_n", out_tok))
+    return "".join(content), "".join(reasoning), done_reason, in_tok, out_tok
+
+
+def list_llamacpp_models(url=LLAMACPP_HOST):
+    """The model(s) a llama-server serves (its --alias), or [] when it is down."""
+    try:
+        r = requests.get(host_of(url) + "/v1/models", timeout=3)
+        r.raise_for_status()
+        return [m["id"] for m in r.json().get("data", []) if m.get("id")]
+    except (requests.RequestException, ValueError, KeyError):
+        return []
+
+
+# --------------------------------------------------------------------------- #
 # VLM client (native endpoint /api/chat, with streaming)
 # --------------------------------------------------------------------------- #
 def stream_chat(payload, url=OLLAMA_HOST, timeout=300, verbose=False):
@@ -552,6 +699,8 @@ def stream_chat(payload, url=OLLAMA_HOST, timeout=300, verbose=False):
     (command_common.interpret) so the streaming/parse loop lives in ONE place.
     Raises requests.RequestException if the network/server fails.
     """
+    if vlm_backend() == "llamacpp":
+        return _stream_chat_llamacpp(payload, url, timeout)
     think_buf, content_buf = [], []
     done_reason = in_tok = out_tok = None
     printed_header = False
@@ -703,6 +852,12 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     }
     if supports_think:
         payload["think"] = False  # ask for no reasoning; content should come first
+    if vlm_backend() == "llamacpp":
+        for chunk in _openai_chunks(payload, url, 600):
+            piece = ((chunk.get("choices") or [{}])[0].get("delta") or {}).get("content")
+            if piece:
+                yield piece
+        return
     chat_url = host_of(url) + "/api/chat"
 
     with requests.post(chat_url, json=payload, stream=True, timeout=600) as r:
