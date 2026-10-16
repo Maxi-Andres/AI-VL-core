@@ -1,0 +1,264 @@
+{
+  "timestamp": "20261016_132300",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [
+    {
+      "model": "smolvlm2-2.2b-q8",
+      "backend": "llama-server",
+      "load_s": 5.16,
+      "vram_mib": 3353,
+      "warmup_s": 0.494,
+      "first_s": {
+        "mean": 0.563,
+        "min": 0.085,
+        "max": 2.943
+      },
+      "total_s": {
+        "mean": 1.122,
+        "min": 0.555,
+        "max": 3.437
+      },
+      "pieces_per_s": {
+        "mean": 189.215,
+        "min": 186.207,
+        "max": 191.255
+      },
+      "facts_ok": 3,
+      "facts_n": 8,
+      "commands_ok": 2,
+      "commands_n": 8,
+      "command_s": {
+        "mean": 0.553,
+        "min": 0.147,
+        "max": 2.817
+      },
+      "detect": {
+        "ok": true,
+        "objects": 3,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 1.1829628399573267,
+        "out_tokens": 175
+      }
+    }
+  ],
+  "detail": {
+    "smolvlm2-2.2b-q8": {
+      "ask": [
+        {
+          "first_s": 2.9433867239858955,
+          "total_s": 3.436698979930952,
+          "pieces": 95,
+          "pieces_per_s": 190.5486816254356,
+          "answer": " En la imagen se puede ver una oficina moderna que tiene una amplia escala de trabajo. Se encuentra unas mesas para las personas que trabajan allí y también un computador para cada persona. Además, hay plantas en el fondo que pueden ayudar a mantener la atmósfera fresca y saludable.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.08920304500497878,
+          "total_s": 0.5560468010371551,
+          "pieces": 88,
+          "pieces_per_s": 186.35785287016603,
+          "answer": " Este es un aparato de medir resistencia, que se llama multimeter. Esto es una herramienta muy útil para medir la resistencia de cualquier material o objeto, lo que puede ser útil en varios aspectos como el calidad del agua, el tamaño de un circuito, y mucho más.",
+          "image": "fotos/clean/14.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.08501166698988527,
+          "total_s": 0.7385878140339628,
+          "pieces": 126,
+          "pieces_per_s": 191.25544982835785,
+          "answer": " La imagen proporciona una visión de un camino urbano que se encuentra entre dos edificios de paredes y plantas. En el camino, hay varios vehículos, incluyendo carros y bicicletas. Algunos de los vecinos están a pie, mientras que otros están en un automóvil. La calle se encuentra entre dos ángeles de paredes, con una línea de trastorno en la parte de arriba.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.09018864401150495,
+          "total_s": 0.7067401410313323,
+          "pieces": 118,
+          "pieces_per_s": 189.7651705746121,
+          "answer": " En la imagen, se ven dos personas trabajando en un lugar que parece ser una oficina moderna. Las personas están sentadas en computadoras y se están trabajando con documentos. Hay tres computadoras en total, dos de las cuales están en la mesa de la persona izquierda y el otro en la mesa de la persona derecha. También hay una planta en la parte de arriba de la imagen.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.08757749292999506,
+          "total_s": 0.5548000949202105,
+          "pieces": 88,
+          "pieces_per_s": 186.2067451989875,
+          "answer": " Este es un aparato de medir resistencia, que se llama multimeter. Esto es una herramienta muy útil para medir la resistencia de cualquier material o objeto, lo que puede ser útil en varios aspectos como el calidad del agua, el tamaño de un circuito, y mucho más.",
+          "image": "fotos/clean/14.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.08486929105129093,
+          "total_s": 0.7387943890644237,
+          "pieces": 126,
+          "pieces_per_s": 191.15339108377458,
+          "answer": " La imagen proporciona una vista de un camino urbano que se encuentra entre dos edificios de paredes. En el centro del camino, hay una carretera que está abierta para tráfico. Además, hay varias plantas en la calle y algunos árboles en la parte de arriba. Algunas personas se encuentran en el camino, pero no son tan grandes como las personas que están en el centro del camino.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 2
+        }
+      ],
+      "facts": [
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿Cuántas personas hay en la imagen? Respondé solo con el número.",
+          "answer": " 2.",
+          "ok": true,
+          "total_s": 0.10563121794257313
+        },
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿De qué marca es la impresora? Respondé solo la marca.",
+          "answer": " HP.",
+          "ok": true,
+          "total_s": 0.08425329299643636
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué valor en kW muestra la pantalla? Respondé solo el número.",
+          "answer": " 178.4.",
+          "ok": false,
+          "total_s": 0.11537547293119133
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué modelo y marca es el instrumento?",
+          "answer": " El instrumento que estás mirando es un \"C.A. 6203\" de la marca \"Dynatac\". Está en color amarillo y tiene una pantalla digital con información sobre la energía y el voltaje.",
+          "ok": false,
+          "total_s": 0.3911859260406345
+        },
+        {
+          "image": "fotos/clean/1.jpeg",
+          "question": "¿De qué marca es el manómetro y en qué unidades mide?",
+          "answer": " El manómetro se encuentra en la marca Beyco, que está en las unidades de Pascals (Pa). La escala del manómetro incluye los valores de 0 Pa hasta 1000 Pa.",
+          "ok": false,
+          "total_s": 0.395592064014636
+        },
+        {
+          "image": "fotos/clean/5.jpeg",
+          "question": "¿Qué marca tiene el termómetro?",
+          "answer": " El termómetro tiene la marca \"C\" en su bordado.",
+          "ok": false,
+          "total_s": 0.18346428498625755
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿Cuántas bicicletas hay en la calle? Respondé solo con el número.",
+          "answer": " 2.",
+          "ok": false,
+          "total_s": 0.0927153859520331
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿De qué color es el auto que está en el centro de la calle?",
+          "answer": " El auto en el centro de la calle es un automóvil negro.",
+          "ok": true,
+          "total_s": 0.16622309596277773
+        }
+      ],
+      "commands": [
+        {
+          "text": "caminá un metro para adelante",
+          "want": "walk",
+          "got": "walk",
+          "params": {
+            "direction": "forward",
+            "speed": "normal",
+            "duration_s": 10.0,
+            "continuous": false
+          },
+          "ok": true,
+          "elapsed_s": 0.43710000000000004
+        },
+        {
+          "text": "girá a la izquierda",
+          "want": "turn",
+          "got": "walk",
+          "params": {
+            "direction": "left",
+            "speed": "slow",
+            "duration_s": null,
+            "continuous": false
+          },
+          "ok": false,
+          "elapsed_s": 2.817
+        },
+        {
+          "text": "pará",
+          "want": "stop",
+          "got": "walk",
+          "params": {
+            "direction": "left",
+            "speed": "normal",
+            "duration_s": 30.0,
+            "continuous": true
+          },
+          "ok": false,
+          "elapsed_s": 0.2698
+        },
+        {
+          "text": "saludá con la mano",
+          "want": "wave_hand",
+          "got": "wave_hand",
+          "params": {
+            "turn": false
+          },
+          "ok": true,
+          "elapsed_s": 0.14780000000000001
+        },
+        {
+          "text": "dame la mano",
+          "want": "shake_hand",
+          "got": "wave_hand",
+          "params": {
+            "turn": false
+          },
+          "ok": false,
+          "elapsed_s": 0.1474
+        },
+        {
+          "text": "sentate",
+          "want": "sit",
+          "got": "walk",
+          "params": {
+            "direction": "left",
+            "speed": "normal",
+            "duration_s": 30.0,
+            "continuous": true
+          },
+          "ok": false,
+          "elapsed_s": 0.26880000000000004
+        },
+        {
+          "text": "levantate",
+          "want": "stand_up",
+          "got": "lie_up",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 0.18619999999999998
+        },
+        {
+          "text": "bailá algo",
+          "want": "dance",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 0.149
+        }
+      ],
+      "detect": {
+        "ok": true,
+        "objects": 3,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 1.1829628399573267,
+        "out_tokens": 175,
+        "raw": "{\"objects\": [{\"type\":\"person\",\"description\":\"A person sitting at a desk with a computer monitor.\",\"bbox\":[295.4,308.1,376.6,401.1],\"reading\":\"person\",\"confidence\":0.9},{\"type\":\"tool\",\"description\":\"A laptop on the desk of the person.\",\"bbox\":[295.4,308.1,376.6,401.1],\"reading\":\"laptop\",\"confidence\":0.9},{\"type\":\"vehicle\",\"description\":\"A printer on a table in the background.\",\"bbox\":[295.4,308.1,376.6,401.1],\"reading\":\"printer\",\"confidence\":0.9}]}"
+      },
+      "warmup_s": 0.494
+    }
+  }
+}

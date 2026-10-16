@@ -1,0 +1,501 @@
+{
+  "timestamp": "20261016_130732",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [
+    {
+      "model": "qwen3vl-2b-q8@1024",
+      "backend": "llama-server",
+      "load_s": 1.56,
+      "vram_mib": 3641,
+      "warmup_s": 0.514,
+      "first_s": {
+        "mean": 0.437,
+        "min": 0.424,
+        "max": 0.466
+      },
+      "total_s": {
+        "mean": 0.827,
+        "min": 0.688,
+        "max": 0.972
+      },
+      "pieces_per_s": {
+        "mean": 160.906,
+        "min": 158.703,
+        "max": 162.391
+      },
+      "facts_ok": 7,
+      "facts_n": 8,
+      "commands_ok": 7,
+      "commands_n": 8,
+      "command_s": {
+        "mean": 0.19,
+        "min": 0.096,
+        "max": 0.485
+      },
+      "detect": {
+        "ok": false,
+        "objects": 0,
+        "people": 0,
+        "finish": "length",
+        "elapsed_s": 13.55261277302634,
+        "out_tokens": 2048
+      }
+    },
+    {
+      "model": "qwen3vl-4b-q4@1024",
+      "backend": "llama-server",
+      "load_s": 1.51,
+      "vram_mib": 4453,
+      "warmup_s": 0.725,
+      "first_s": {
+        "mean": 0.597,
+        "min": 0.571,
+        "max": 0.633
+      },
+      "total_s": {
+        "mean": 1.22,
+        "min": 1.065,
+        "max": 1.828
+      },
+      "pieces_per_s": {
+        "mean": 111.783,
+        "min": 110.618,
+        "max": 112.959
+      },
+      "facts_ok": 8,
+      "facts_n": 8,
+      "commands_ok": 8,
+      "commands_n": 8,
+      "command_s": {
+        "mean": 0.329,
+        "min": 0.199,
+        "max": 0.882
+      },
+      "detect": {
+        "ok": true,
+        "objects": 24,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 12.55131952103693,
+        "out_tokens": 1308
+      }
+    }
+  ],
+  "detail": {
+    "qwen3vl-2b-q8@1024": {
+      "ask": [
+        {
+          "first_s": 0.4319052869686857,
+          "total_s": 0.6876782369799912,
+          "pieces": 42,
+          "pieces_per_s": 160.29842091662837,
+          "answer": "En la imagen se ve un espacio de trabajo moderno con varias personas trabajando en sus computadoras. El ambiente es profesional y bien iluminado, con plantas y mobiliario contemporáneo.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.4662902900017798,
+          "total_s": 0.9041377800749615,
+          "pieces": 72,
+          "pieces_per_s": 162.1569190407671,
+          "answer": "Este aparato es un analizador de potencia (power analyzer), que mide la cantidad de energía eléctrica en una red eléctrica. En el dispositivo se muestran tres valores principales: la potencia activa (en kW), la potencia reactiva (en kVAR) y la corriente (en kVA).",
+          "image": "fotos/clean/14.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.42442688799928874,
+          "total_s": 0.9724873939994723,
+          "pieces": 90,
+          "pieces_per_s": 162.3908291614251,
+          "answer": "La imagen muestra una calle urbana con árboles jóvenes plantados en el centro de la acera, separando las calles para vehículos y ciclistas. Hay varios automóviles circulando por la vía principal, mientras que un ciclista avanza por una carretera dedicada a este propósito. En el fondo se observan edificios comerciales con tiendas y señales de negocios.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.4299074599985033,
+          "total_s": 0.6882510150317103,
+          "pieces": 42,
+          "pieces_per_s": 158.70339786386367,
+          "answer": "En la imagen se ve un espacio de trabajo moderno con varias personas trabajando en sus computadoras. La oficina tiene una decoración limpia y profesional con plantas y luces de techo.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.4437432859558612,
+          "total_s": 0.7821773829637095,
+          "pieces": 55,
+          "pieces_per_s": 159.55839106467968,
+          "answer": "Este aparato es un analizador de potencia, que mide la cantidad de energía eléctrica en una red eléctrica, incluyendo el poder (kW), la capacidad reactiva (kVAR) y la corriente (kVA).",
+          "image": "fotos/clean/14.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.4247078619664535,
+          "total_s": 0.9298670300049707,
+          "pieces": 83,
+          "pieces_per_s": 162.3250753191273,
+          "answer": "La imagen muestra una calle urbana con árboles jóvenes plantados en el centro de la acera y un carril para ciclistas a la derecha. Hay varios vehículos circulando por la carretera, incluyendo automóviles y un camión. A lo lejos se observan edificios de varios pisos con comercios en las fachadas.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 2
+        }
+      ],
+      "facts": [
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿Cuántas personas hay en la imagen? Respondé solo con el número.",
+          "answer": "2",
+          "ok": true,
+          "total_s": 0.42298901604954153
+        },
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿De qué marca es la impresora? Respondé solo la marca.",
+          "answer": "HP",
+          "ok": true,
+          "total_s": 0.4264252850553021
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué valor en kW muestra la pantalla? Respondé solo el número.",
+          "answer": "17.84",
+          "ok": true,
+          "total_s": 0.46410348103381693
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué modelo y marca es el instrumento?",
+          "answer": "El instrumento es el C.A 8220 de la marca Chauvin Arnoux.",
+          "ok": true,
+          "total_s": 0.5706655479734764
+        },
+        {
+          "image": "fotos/clean/1.jpeg",
+          "question": "¿De qué marca es el manómetro y en qué unidades mide?",
+          "answer": "El manómetro es de la marca BEYCA y mide en Kg/cm² y Lb/pulg².",
+          "ok": true,
+          "total_s": 0.5690357380080968
+        },
+        {
+          "image": "fotos/clean/5.jpeg",
+          "question": "¿Qué marca tiene el termómetro?",
+          "answer": "De Wit",
+          "ok": true,
+          "total_s": 0.420739661087282
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿Cuántas bicicletas hay en la calle? Respondé solo con el número.",
+          "answer": "1",
+          "ok": true,
+          "total_s": 0.4145286859711632
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿De qué color es el auto que está en el centro de la calle?",
+          "answer": "El auto que está en el centro de la calle es azul.",
+          "ok": false,
+          "total_s": 0.504219004069455
+        }
+      ],
+      "commands": [
+        {
+          "text": "caminá un metro para adelante",
+          "want": "walk",
+          "got": "walk",
+          "params": {
+            "direction": "forward",
+            "speed": "normal",
+            "duration_s": null,
+            "continuous": true
+          },
+          "ok": true,
+          "elapsed_s": 0.48469999999999996
+        },
+        {
+          "text": "girá a la izquierda",
+          "want": "turn",
+          "got": "turn",
+          "params": {
+            "direction": "left",
+            "speed": "normal",
+            "duration_s": null
+          },
+          "ok": true,
+          "elapsed_s": 0.1966
+        },
+        {
+          "text": "pará",
+          "want": "stop",
+          "got": "stop",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.1182
+        },
+        {
+          "text": "saludá con la mano",
+          "want": "wave_hand",
+          "got": "wave_hand",
+          "params": {
+            "turn": true
+          },
+          "ok": true,
+          "elapsed_s": 0.1731
+        },
+        {
+          "text": "dame la mano",
+          "want": "shake_hand",
+          "got": "shake_hand",
+          "params": {
+            "on": true
+          },
+          "ok": true,
+          "elapsed_s": 0.1901
+        },
+        {
+          "text": "sentate",
+          "want": "sit",
+          "got": "sit",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.1185
+        },
+        {
+          "text": "levantate",
+          "want": "stand_up",
+          "got": "lie_up",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 0.1442
+        },
+        {
+          "text": "bailá algo",
+          "want": "dance",
+          "got": "dance",
+          "params": {
+            "name": "Waist_Drum_Dance"
+          },
+          "ok": true,
+          "elapsed_s": 0.0955
+        }
+      ],
+      "detect": {
+        "ok": false,
+        "objects": 0,
+        "people": 0,
+        "finish": "length",
+        "elapsed_s": 13.55261277302634,
+        "out_tokens": 2048,
+        "raw": "{\"objects\": [{\"type\": \"person\", \"description\": \"woman sitting at a desk working on a computer\", \"bbox\": [578, 469, 682, 630], \"reading\": null, \"confidence\": 0.95}, {\"type\": \"person\", \"description\": \"woman sitting at a desk with her head down\", \"bbox\": [410, 398, 470, 473], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [452, 530, 555, 617], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"printer\", \"bbox\": [745, 514, 859, 662], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [358, 435, 417, 473], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"keyboard\", \"bbox\": [529, 581, 600, 637], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [490, 422, 594, 530], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [417, 448, 440, 498], \"reading\": null, \"confidence\": 0.95}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [692, 413, 792, 498], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [452, 530, 555, 617], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"keyboard\", \"bbox\": [529, 581, 600, 637], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [490, 422, 594, 530], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [358, 435, 417, 473], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [692, 413, 792, 498], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [452, 530, 555, 617], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"keyboard\", \"bbox\": [529, 581, 600, 637], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [490, 422, 594, 530], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [358, 435, 417, 473], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [692, 413, 792, 498], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [452, 530, 555, 617], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"keyboard\", \"bbox\": [529, 581, 600, 637], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [490, 422, 594, 530], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [358, 435, 417, 473], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [692, 413, 792, 498], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [452, 530, 555, 617], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"keyboard\", \"bbox\": [529, 581, 600, 637], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [490, 422, 594, 530], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [358, 435, 417, 473], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [692, 413, 792, 498], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [452, 530, 555, 617], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"keyboard\", \"bbox\": [529, 581, 600, 637], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [490, 422, 594, 530], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"laptop on a table\", \"bbox\": [358, 435, 417, 473], \"reading\": null, \"confidence\": 0.96}, {\"type\": \"tool\", \"description\": \"monitor\", \"bbox\": [692, 413, 792, 498], \"reading\": null, \"confidence\": 0.96}, "
+      },
+      "warmup_s": 0.514
+    },
+    "qwen3vl-4b-q4@1024": {
+      "ask": [
+        {
+          "first_s": 0.5941796459956095,
+          "total_s": 1.108711184002459,
+          "pieces": 59,
+          "pieces_per_s": 112.72389681821193,
+          "answer": "En la imagen se ve un espacio de trabajo moderno con varias mesas y sillas donde personas están concentradas en sus tareas. El ambiente está iluminado por luces empotradas y cuenta con plantas decorativas que aportan un toque natural al entorno.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.6333187069976702,
+          "total_s": 1.8284397800453007,
+          "pieces": 136,
+          "pieces_per_s": 112.95926667558618,
+          "answer": "Este es un analizador de potencia modelo C.A 8220 de la marca Chauvin Arnoux.\n\nEstá midiendo:\n- Potencia activa: 17.84 kW (kilovatios)\n- Potencia reactiva: 12.26 kVAR (kilo-voltamperes reactivos)\n- Potencia aparente: 21.65 kVA (kilovoltamperes)\n\nEs un instrumento utilizado para medir parámetros eléctricos en circuitos de energía, como voltaje, corriente, potencia y factor de potencia.",
+          "image": "fotos/clean/14.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.5957781668985263,
+          "total_s": 1.0687307239277288,
+          "pieces": 54,
+          "pieces_per_s": 112.06198002800416,
+          "answer": "Una calle urbana con árboles y vehículos, incluyendo un coche y una bicicleta en el carril de ciclistas. Hay edificios comerciales a lo largo de la acera y otros coches estacionados.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.5713281439384446,
+          "total_s": 1.0940158260054886,
+          "pieces": 59,
+          "pieces_per_s": 110.96492607331133,
+          "answer": "En la imagen se ve un espacio de oficina moderno con varias estaciones de trabajo y personas ocupadas en sus tareas. El ambiente está iluminado por luces lineales y cuenta con plantas decorativas, mobiliario ergonómico y equipos informáticos.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.5992160100722685,
+          "total_s": 1.15590923698619,
+          "pieces": 63,
+          "pieces_per_s": 111.37193161789038,
+          "answer": "Este es un analizador de potencia, modelo C.A 8220 de la marca Chauvin Arnoux. Mide parámetros eléctricos como potencia activa (kW), potencia reactiva (kVAR) y potencia aparente (kVA).",
+          "image": "fotos/clean/14.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.5857275910675526,
+          "total_s": 1.0648525709984824,
+          "pieces": 54,
+          "pieces_per_s": 110.61831926951591,
+          "answer": "Una calle urbana con árboles y vehículos, incluyendo un coche y una bicicleta en el carril de ciclistas. Hay edificios comerciales a lo largo de la acera y otros coches estacionados.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 2
+        }
+      ],
+      "facts": [
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿Cuántas personas hay en la imagen? Respondé solo con el número.",
+          "answer": "2",
+          "ok": true,
+          "total_s": 0.5854677769821137
+        },
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿De qué marca es la impresora? Respondé solo la marca.",
+          "answer": "HP",
+          "ok": true,
+          "total_s": 0.5857336119515821
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué valor en kW muestra la pantalla? Respondé solo el número.",
+          "answer": "17.84",
+          "ok": true,
+          "total_s": 0.6410987579729408
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué modelo y marca es el instrumento?",
+          "answer": "El instrumento es un **Power Analyzer** de la marca **CRAUVIN ARNOUX**, modelo **C.A 8220**.",
+          "ok": true,
+          "total_s": 0.8874156910460442
+        },
+        {
+          "image": "fotos/clean/1.jpeg",
+          "question": "¿De qué marca es el manómetro y en qué unidades mide?",
+          "answer": "El manómetro es de la marca **Beyca** y mide en **Kg/cm²** y **Lb/pulg²**.",
+          "ok": true,
+          "total_s": 0.8615548060042784
+        },
+        {
+          "image": "fotos/clean/5.jpeg",
+          "question": "¿Qué marca tiene el termómetro?",
+          "answer": "La marca del termómetro es DE WIT.",
+          "ok": true,
+          "total_s": 0.6704110709251836
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿Cuántas bicicletas hay en la calle? Respondé solo con el número.",
+          "answer": "1",
+          "ok": true,
+          "total_s": 0.5997106319991872
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿De qué color es el auto que está en el centro de la calle?",
+          "answer": "El auto que está en el centro de la calle es de color negro.",
+          "ok": true,
+          "total_s": 0.7264680659864098
+        }
+      ],
+      "commands": [
+        {
+          "text": "caminá un metro para adelante",
+          "want": "walk",
+          "got": "walk",
+          "params": {
+            "direction": "forward",
+            "speed": "normal",
+            "duration_s": 1.0,
+            "continuous": false
+          },
+          "ok": true,
+          "elapsed_s": 0.8824
+        },
+        {
+          "text": "girá a la izquierda",
+          "want": "turn",
+          "got": "turn",
+          "params": {
+            "direction": "left",
+            "speed": "slow",
+            "duration_s": null
+          },
+          "ok": true,
+          "elapsed_s": 0.27
+        },
+        {
+          "text": "pará",
+          "want": "stop",
+          "got": "stop",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.1987
+        },
+        {
+          "text": "saludá con la mano",
+          "want": "wave_hand",
+          "got": "wave_hand",
+          "params": {
+            "turn": false
+          },
+          "ok": true,
+          "elapsed_s": 0.271
+        },
+        {
+          "text": "dame la mano",
+          "want": "shake_hand",
+          "got": "shake_hand",
+          "params": {
+            "on": true
+          },
+          "ok": true,
+          "elapsed_s": 0.26830000000000004
+        },
+        {
+          "text": "sentate",
+          "want": "sit",
+          "got": "sit",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.1985
+        },
+        {
+          "text": "levantate",
+          "want": "stand_up",
+          "got": "stand_up",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.2317
+        },
+        {
+          "text": "bailá algo",
+          "want": "dance",
+          "got": "dance",
+          "params": {
+            "name": "Waist_Drum_Dance"
+          },
+          "ok": true,
+          "elapsed_s": 0.3153
+        }
+      ],
+      "detect": {
+        "ok": true,
+        "objects": 24,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 12.55131952103693,
+        "out_tokens": 1308,
+        "raw": "{\"objects\": [{\"type\": \"person\", \"description\": \"woman sitting at a desk working on a computer\", \"bbox\": [578, 469, 683, 702], \"reading\": null, \"confidence\": 0.91}, {\"type\": \"person\", \"description\": \"woman sitting at a desk with laptop and phone\", \"bbox\": [407, 400, 470, 500], \"reading\": null, \"confidence\": 0.86}, {\"type\": \"chair\", \"description\": \"black office chair with wheels\", \"bbox\": [573, 512, 755, 945], \"reading\": null, \"confidence\": 0.93}, {\"type\": \"chair\", \"description\": \"gray upholstered chair with metal legs\", \"bbox\": [276, 560, 468, 912], \"reading\": null, \"confidence\": 0.92}, {\"type\": \"chair\", \"description\": \"black office chair at a desk\", \"bbox\": [383, 520, 457, 638], \"reading\": null, \"confidence\": 0.88}, {\"type\": \"chair\", \"description\": \"black office chair with wheels\", \"bbox\": [180, 479, 288, 660], \"reading\": null, \"confidence\": 0.85}, {\"type\": \"desk\", \"description\": \"wooden desk with computer monitor and keyboard\", \"bbox\": [403, 548, 610, 967], \"reading\": null, \"confidence\": 0.92}, {\"type\": \"monitor\", \"description\": \"computer monitor displaying spreadsheet data\", \"bbox\": [492, 421, 597, 534], \"reading\": null, \"confidence\": 0.89}, {\"type\": \"monitor\", \"description\": \"black computer monitor on desk\", \"bbox\": [694, 414, 795, 499], \"reading\": null, \"confidence\": 0.87}, {\"type\": \"laptop\", \"description\": \"open laptop with keyboard and screen\", \"bbox\": [443, 529, 556, 618], \"reading\": null, \"confidence\": 0.88}, {\"type\": \"printer\", \"description\": \"white HP printer on desk\", \"bbox\": [745, 534, 862, 660], \"reading\": \"HP\", \"confidence\": 0.91}, {\"type\": \"plant\", \"description\": \"tall green leafy plant in black planter\", \"bbox\": [873, 302, 1000, 845], \"reading\": null, \"confidence\": 0.86}, {\"type\": \"plant\", \"description\": \"small potted plant with broad leaves\", \"bbox\": [109, 484, 200, 693], \"reading\": null, \"confidence\": 0.85}, {\"type\": \"plant\", \"description\": \"green leafy plant in black planter\", \"bbox\": [837, 452, 915, 618], \"reading\": null, \"confidence\": 0.84}, {\"type\": \"light\", \"description\": \"long linear ceiling light fixture\", \"bbox\": [447, 227, 556, 273], \"reading\": null, \"confidence\": 0.91}, {\"type\": \"light\", \"description\": \"linear ceiling light fixture\", \"bbox\": [338, 270, 472, 288], \"reading\": null, \"confidence\": 0.89}, {\"type\": \"light\", \"description\": \"linear ceiling light fixture\", \"bbox\": [685, 261, 870, 283], \"reading\": null, \"confidence\": 0.88}, {\"type\": \"door\", \"description\": \"glass door with metal handle\", \"bbox\": [0, 184, 120, 690], \"reading\": null, \"confidence\": 0.93}, {\"type\": \"wall\", \"description\": \"gray wall with logo and glass panel\", \"bbox\": [0, 57, 375, 690], \"reading\": \"SILK Technologies\", \"confidence\": 0.87}, {\"type\": \"wall\", \"description\": \"white tiled wall with horizontal lighting fixtures\", \"bbox\": [372, 174, 887, 500], \"reading\": null, \"confidence\": 0.91}, {\"type\": \"ceiling\", \"description\": \"industrial ceiling with exposed beams and track lights\", \"bbox\": [0, 0, 1000, 236], \"reading\": null, \"confidence\": 0.87}, {\"type\": \"keyboard\", \"description\": \"black keyboard on desk\", \"bbox\": [534, 590, 600, 638], \"reading\": null, \"confidence\": 0.88}, {\"type\": \"phone\", \"description\": \"black telephone with handset and base\", \"bbox\": [432, 571, 492, 640], \"reading\": null, \"confidence\": 0.86}, {\"type\": \"mouse\", \"description\": \"black computer mouse on desk\", \"bbox\": [558, 548, 578, 563], \"reading\": null, \"confidence\": 0.82}]}"
+      },
+      "warmup_s": 0.725
+    }
+  }
+}

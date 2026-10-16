@@ -1,0 +1,255 @@
+{
+  "timestamp": "20261016_144017",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [
+    {
+      "model": "internvl3-8b-q4",
+      "backend": "llama-server",
+      "load_s": 13.34,
+      "vram_mib": 5073,
+      "warmup_s": 9.044,
+      "first_s": {
+        "mean": 0.517,
+        "min": 0.174,
+        "max": 0.707
+      },
+      "total_s": {
+        "mean": 1.242,
+        "min": 0.961,
+        "max": 1.49
+      },
+      "pieces_per_s": {
+        "mean": 78.508,
+        "min": 76.449,
+        "max": 80.901
+      },
+      "facts_ok": 6,
+      "facts_n": 8,
+      "commands_ok": 8,
+      "commands_n": 8,
+      "command_s": {
+        "mean": 0.449,
+        "min": 0.252,
+        "max": 1.259
+      },
+      "detect": {
+        "ok": true,
+        "objects": 10,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 7.165854691062123,
+        "out_tokens": 508
+      }
+    }
+  ],
+  "detail": {
+    "internvl3-8b-q4": {
+      "ask": [
+        {
+          "first_s": 0.7066441220231354,
+          "total_s": 1.1383050929289311,
+          "pieces": 34,
+          "pieces_per_s": 76.4488851766073,
+          "answer": "En la imagen se ve un moderno office con mesas de trabajo y computadoras. Hay plantas decorativas y una persona sentada frente a su escritorio.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.6885157130891457,
+          "total_s": 1.4901749290293083,
+          "pieces": 64,
+          "pieces_per_s": 78.58700897751851,
+          "answer": "Este es un analizador de potencia portátil. Mide la energía eléctrica en kilovatios (kW), el factor de potencia en kilovoltamperes reactivos (kVAR) y la energía aparente en kilovoltamperes (kVA).",
+          "image": "fotos/clean/14.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.18267376103904098,
+          "total_s": 0.9611899279989302,
+          "pieces": 63,
+          "pieces_per_s": 79.63868013442857,
+          "answer": "La imagen muestra una calle con vehículos y un ciclista en una vía separada para bicicletas. Hay árboles a lo largo de los bordes de la calle y edificios comerciales en el fondo. La zona parece ser una ciudad tranquila con tráfico ligero.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.6618920830078423,
+          "total_s": 1.0405709970509633,
+          "pieces": 30,
+          "pieces_per_s": 76.58203011720295,
+          "answer": "Veo un office moderno con mesas de trabajo y computadoras. Hay plantas decorativas y luces colgadas del techo.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.6869729070458561,
+          "total_s": 1.485558802029118,
+          "pieces": 64,
+          "pieces_per_s": 78.88944745426598,
+          "answer": "Este es un analizador de potencia portátil. Mide la energía eléctrica en kilovatios (kW), el factor de potencia en kilovoltamperes reactivos (kVAR) y la energía aparente en kilovoltamperes (kVA).",
+          "image": "fotos/clean/14.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.174254420096986,
+          "total_s": 1.3361631110310555,
+          "pieces": 95,
+          "pieces_per_s": 80.90136577292705,
+          "answer": "La imagen muestra una calle con un carril para bicicletas y vehículos. Hay árboles plantados a lo largo de los bordes de la acera. Un ciclista está circulando por el carril de bicicletas, mientras que varios coches están estacionados en la parte derecha de la calle. Las calles parecen estar en una zona urbana con edificios y negocios a ambos lados.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 2
+        }
+      ],
+      "facts": [
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿Cuántas personas hay en la imagen? Respondé solo con el número.",
+          "answer": "2",
+          "ok": true,
+          "total_s": 0.689150306978263
+        },
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿De qué marca es la impresora? Respondé solo la marca.",
+          "answer": "Epson",
+          "ok": false,
+          "total_s": 0.7235136220697314
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué valor en kW muestra la pantalla? Respondé solo el número.",
+          "answer": "17.84",
+          "ok": true,
+          "total_s": 0.7446562510449439
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué modelo y marca es el instrumento?",
+          "answer": "El instrumento es un analizador de potencia CA 8220 de la marca Chalvin Instruments.",
+          "ok": false,
+          "total_s": 0.9818482029950246
+        },
+        {
+          "image": "fotos/clean/1.jpeg",
+          "question": "¿De qué marca es el manómetro y en qué unidades mide?",
+          "answer": "El manómetro es de la marca BEYCA y mide en kg/cm² y lb/pulg².",
+          "ok": true,
+          "total_s": 1.022194014978595
+        },
+        {
+          "image": "fotos/clean/5.jpeg",
+          "question": "¿Qué marca tiene el termómetro?",
+          "answer": "El termómetro es de la marca \"DE WIT\".",
+          "ok": true,
+          "total_s": 0.8791217070538551
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿Cuántas bicicletas hay en la calle? Respondé solo con el número.",
+          "answer": "1",
+          "ok": true,
+          "total_s": 0.1891797239659354
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿De qué color es el auto que está en el centro de la calle?",
+          "answer": "El auto en el centro de la calle es negro.",
+          "ok": true,
+          "total_s": 0.28641287493519485
+        }
+      ],
+      "commands": [
+        {
+          "text": "caminá un metro para adelante",
+          "want": "walk",
+          "got": "walk",
+          "params": {
+            "direction": "forward",
+            "speed": "normal",
+            "duration_s": null,
+            "continuous": false
+          },
+          "ok": true,
+          "elapsed_s": 1.259
+        },
+        {
+          "text": "girá a la izquierda",
+          "want": "turn",
+          "got": "turn",
+          "params": {
+            "direction": "left",
+            "speed": "slow",
+            "duration_s": null
+          },
+          "ok": true,
+          "elapsed_s": 0.37510000000000004
+        },
+        {
+          "text": "pará",
+          "want": "stop",
+          "got": "stop",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.2521
+        },
+        {
+          "text": "saludá con la mano",
+          "want": "wave_hand",
+          "got": "wave_hand",
+          "params": {
+            "turn": true
+          },
+          "ok": true,
+          "elapsed_s": 0.3579
+        },
+        {
+          "text": "dame la mano",
+          "want": "shake_hand",
+          "got": "shake_hand",
+          "params": {
+            "on": true
+          },
+          "ok": true,
+          "elapsed_s": 0.3454
+        },
+        {
+          "text": "sentate",
+          "want": "sit",
+          "got": "sit",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.31339999999999996
+        },
+        {
+          "text": "levantate",
+          "want": "stand_up",
+          "got": "stand_up",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.2754
+        },
+        {
+          "text": "bailá algo",
+          "want": "dance",
+          "got": "dance",
+          "params": {
+            "name": "Waist_Drum_Dance"
+          },
+          "ok": true,
+          "elapsed_s": 0.411
+        }
+      ],
+      "detect": {
+        "ok": true,
+        "objects": 10,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 7.165854691062123,
+        "out_tokens": 508,
+        "raw": "{\"objects\": [{\"type\": \"person\", \"description\": \"woman working\", \"bbox\": [0.45, 0.35, 0.6, 0.7], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"person\", \"description\": \"man working\", \"bbox\": [0.25, 0.45, 0.35, 0.8], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"chair\", \"description\": \"office chair\", \"bbox\": [0.15, 0.6, 0.25, 0.75], \"reading\": null, \"confidence\": 0.8}, {\"type\": \"desk\", \"description\": \"office desk\", \"bbox\": [0.3, 0.4, 0.5, 0.9], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"monitor\", \"description\": \"computer monitor\", \"bbox\": [0.2, 0.1, 0.3, 0.2], \"reading\": null, \"confidence\": 0.85}, {\"type\": \"keyboard\", \"description\": \"computer keyboard\", \"bbox\": [0.4, 0.6, 0.5, 0.7], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"mouse\", \"description\": \"computer mouse\", \"bbox\": [0.35, 0.8, 0.4, 0.9], \"reading\": null, \"confidence\": 0.85}, {\"type\": \"printer\", \"description\": \"office printer\", \"bbox\": [0.6, 0.2, 0.7, 0.3], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"lamp\", \"description\": \"ceiling lamp\", \"bbox\": [0.5, 0.1, 0.6, 0.2], \"reading\": null, \"confidence\": 0.85}, {\"type\": \"plant\", \"description\": \"office plant\", \"bbox\": [0.7, 0.3, 0.8, 0.4], \"reading\": null, \"confidence\": 0.9}]}"
+      },
+      "warmup_s": 9.044
+    }
+  }
+}

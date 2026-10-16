@@ -143,7 +143,9 @@ How it is wired:
 - At startup `service.py` warms up Whisper, Piper and the VLM in the background, so the
   first question does not pay ~9 s of loading.
 
-Comparing candidate models: `python3 src/vlm_server_benchmark.py --list` shows which GGUF
+Every measurement (VLM, speech-to-text, text-to-speech), its method and its raw results:
+[`docs/MODEL_BENCHMARKS.md`](docs/MODEL_BENCHMARKS.md). Comparing candidate models:
+`python3 src/vlm_server_benchmark.py --list` shows which GGUF
 files are present; `python3 src/vlm_server_benchmark.py --ollama qwen3-vl:4b-instruct`
 runs every present model plus Ollama as the "before" row.
 

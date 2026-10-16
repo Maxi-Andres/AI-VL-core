@@ -1,0 +1,14 @@
+{"voice": "es_AR-daniela-high", "cold_s": 0.87, "per_sentence_s": 0.31, "rtf": 0.088}
+{"voice": "es_ES-davefx-medium", "cold_s": 0.7, "per_sentence_s": 0.084, "rtf": 0.022}
+{"voice": "es_ES-sharvard-medium", "cold_s": 0.71, "per_sentence_s": 0.108, "rtf": 0.026}
+{"voice": "es_MX-ald-medium", "cold_s": 0.71, "per_sentence_s": 0.116, "rtf": 0.025}
+{"voice": "es_MX-claude-high", "cold_s": 0.53, "per_sentence_s": 0.112, "rtf": 0.025}
+{"voice": "ef_dora", "cold_s": 0.99, "per_sentence_s": 0.646, "rtf": 0.161}
+{"voice": "em_alex", "cold_s": 0.14, "per_sentence_s": 0.646, "rtf": 0.159}
+{"voice": "em_santa", "cold_s": 0.13, "per_sentence_s": 0.554, "rtf": 0.136}
+{"voice": "pocket spanish (cpu)", "load_s": 97.7, "first_audio_s": 0.097, "per_sentence_s": 1.27, "rtf": 0.277, "vram_mib": 0}
+{"voice": "pocket spanish_24l (cpu)", "load_s": 140.3, "first_audio_s": 0.316, "per_sentence_s": 4.112, "rtf": 0.871, "vram_mib": 0}
+{"voice": "pocket spanish (cuda)", "load_s": 0.9, "first_audio_s": 0.02, "per_sentence_s": 0.324, "rtf": 0.067, "vram_mib": 573}
+{"voice": "pocket spanish_24l (cuda)", "load_s": 1.8, "first_audio_s": 0.036, "per_sentence_s": 0.721, "rtf": 0.162, "vram_mib": 1494}
+{"voice": "qwen3-tts 0.6B aiden (cuda)", "load_s": 376.9, "per_sentence_s": 4.061, "rtf": 0.708, "vram_mib": 2295}
+{"voice": "qwen3-tts 0.6B dylan (cuda)", "load_s": 376.9, "per_sentence_s": 4.132, "rtf": 0.704, "vram_mib": 2295}

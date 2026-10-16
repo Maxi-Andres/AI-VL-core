@@ -1,0 +1,14 @@
+{
+  "timestamp": "20261016_133202",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [],
+  "detail": {
+    "qwen3vl-8b-q4": {
+      "error": "Response ended prematurely"
+    },
+    "qwen3vl-8b-q4@1024": {
+      "error": "Response ended prematurely"
+    }
+  }
+}

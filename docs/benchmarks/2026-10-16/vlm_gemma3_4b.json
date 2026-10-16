@@ -1,0 +1,260 @@
+{
+  "timestamp": "20261016_130843",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [
+    {
+      "model": "gemma3-4b-q4",
+      "backend": "llama-server",
+      "load_s": 10.05,
+      "vram_mib": 3873,
+      "warmup_s": 2.841,
+      "first_s": {
+        "mean": 0.686,
+        "min": 0.681,
+        "max": 0.69
+      },
+      "total_s": {
+        "mean": 1.064,
+        "min": 0.948,
+        "max": 1.307
+      },
+      "pieces_per_s": {
+        "mean": 108.824,
+        "min": 106.641,
+        "max": 110.962
+      },
+      "facts_ok": 7,
+      "facts_n": 8,
+      "commands_ok": 7,
+      "commands_n": 8,
+      "command_s": {
+        "mean": 0.339,
+        "min": 0.201,
+        "max": 0.736
+      },
+      "detect": {
+        "ok": true,
+        "objects": 0,
+        "people": 0,
+        "finish": "stop",
+        "elapsed_s": 5.068186477990821,
+        "out_tokens": 467
+      }
+    }
+  ],
+  "detail": {
+    "gemma3-4b-q4": {
+      "ask": [
+        {
+          "first_s": 0.6853424400324002,
+          "total_s": 0.9760365430265665,
+          "pieces": 32,
+          "pieces_per_s": 106.64131016315152,
+          "answer": "La imagen muestra una oficina moderna con varios empleados trabajando en sus computadoras y escritorios. Hay plantas decorativas y luces LED empotradas en el techo.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.6853405359433964,
+          "total_s": 1.3071773769333959,
+          "pieces": 70,
+          "pieces_per_s": 110.96158260766296,
+          "answer": "Esta imagen muestra un analizador de potencia, específicamente el \"C.A. 8220\" de Chauvin Arnoux. Está midiendo la potencia activa (kW), potencia reactiva (kVAR) y corriente aparente (kVA) de una fuente de energía.  La pantalla muestra los valores actuales de estas mediciones.",
+          "image": "fotos/clean/14.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.6901327350642532,
+          "total_s": 0.9587537790648639,
+          "pieces": 30,
+          "pieces_per_s": 107.95877928288473,
+          "answer": "La imagen muestra una calle urbana con varios coches y un ciclista. Hay árboles plantados a lo largo del carril y edificios altos de fondo.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 0.686252627056092,
+          "total_s": 0.9894035650650039,
+          "pieces": 34,
+          "pieces_per_s": 108.85666465933838,
+          "answer": "La imagen muestra un espacio de oficina moderno con varias estaciones de trabajo y empleados trabajando en computadoras. Hay plantas decorativas y luces LED empotradas en el techo.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.6872284079436213,
+          "total_s": 1.2046820370014757,
+          "pieces": 58,
+          "pieces_per_s": 110.15479803239927,
+          "answer": "Esta imagen muestra un analizador de potencia, específicamente el \"C.A. 8220\" de Chauvin Arnoux. Está midiendo la potencia activa (kW), potencia reactiva (kVAR) y corriente aparente (kVA) de una fuente de energía.",
+          "image": "fotos/clean/14.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 0.6806723100598902,
+          "total_s": 0.9482720290543512,
+          "pieces": 30,
+          "pieces_per_s": 108.3708163408059,
+          "answer": "La imagen muestra una calle urbana con varios coches y un ciclista. Hay árboles plantados a lo largo del carril y edificios altos de fondo.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 2
+        }
+      ],
+      "facts": [
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿Cuántas personas hay en la imagen? Respondé solo con el número.",
+          "answer": "2",
+          "ok": true,
+          "total_s": 0.6939694409957156
+        },
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿De qué marca es la impresora? Respondé solo la marca.",
+          "answer": "HP",
+          "ok": true,
+          "total_s": 0.6933737200452015
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué valor en kW muestra la pantalla? Respondé solo el número.",
+          "answer": "17.84",
+          "ok": true,
+          "total_s": 0.7255824339808896
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué modelo y marca es el instrumento?",
+          "answer": "The instrument is a C.A. 8220 Power Analyzer by Chauvin Arnoux.",
+          "ok": true,
+          "total_s": 0.8713467699708417
+        },
+        {
+          "image": "fotos/clean/1.jpeg",
+          "question": "¿De qué marca es el manómetro y en qué unidades mide?",
+          "answer": "The pressure gauge is made by Beyca and measures in Kg/cm² and Lb/pulg².",
+          "ok": true,
+          "total_s": 0.8858314360259101
+        },
+        {
+          "image": "fotos/clean/5.jpeg",
+          "question": "¿Qué marca tiene el termómetro?",
+          "answer": "The thermometer has the brand name \"De Wit\" on it.",
+          "ok": true,
+          "total_s": 0.8053226140327752
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿Cuántas bicicletas hay en la calle? Respondé solo con el número.",
+          "answer": "1",
+          "ok": true,
+          "total_s": 0.6853712040465325
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿De qué color es el auto que está en el centro de la calle?",
+          "answer": "The car in the center of the street is dark gray.",
+          "ok": false,
+          "total_s": 0.7847933419980109
+        }
+      ],
+      "commands": [
+        {
+          "text": "caminá un metro para adelante",
+          "want": "walk",
+          "got": "walk",
+          "params": {
+            "direction": "forward",
+            "speed": "normal",
+            "duration_s": null,
+            "continuous": false
+          },
+          "ok": true,
+          "elapsed_s": 0.7362000000000001
+        },
+        {
+          "text": "girá a la izquierda",
+          "want": "turn",
+          "got": "turn",
+          "params": {
+            "direction": "left",
+            "speed": "normal",
+            "duration_s": null
+          },
+          "ok": true,
+          "elapsed_s": 0.39139999999999997
+        },
+        {
+          "text": "pará",
+          "want": "stop",
+          "got": "walk",
+          "params": {
+            "direction": "forward",
+            "speed": "normal",
+            "duration_s": null,
+            "continuous": false
+          },
+          "ok": false,
+          "elapsed_s": 0.2999
+        },
+        {
+          "text": "saludá con la mano",
+          "want": "wave_hand",
+          "got": "wave_hand",
+          "params": {
+            "turn": true
+          },
+          "ok": true,
+          "elapsed_s": 0.26830000000000004
+        },
+        {
+          "text": "dame la mano",
+          "want": "shake_hand",
+          "got": "shake_hand",
+          "params": {
+            "on": true
+          },
+          "ok": true,
+          "elapsed_s": 0.3049
+        },
+        {
+          "text": "sentate",
+          "want": "sit",
+          "got": "sit",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.2009
+        },
+        {
+          "text": "levantate",
+          "want": "stand_up",
+          "got": "stand_up",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 0.22
+        },
+        {
+          "text": "bailá algo",
+          "want": "dance",
+          "got": "dance",
+          "params": {
+            "name": "Waist_Drum_Dance"
+          },
+          "ok": true,
+          "elapsed_s": 0.29369999999999996
+        }
+      ],
+      "detect": {
+        "ok": true,
+        "objects": 0,
+        "people": 0,
+        "finish": "stop",
+        "elapsed_s": 5.068186477990821,
+        "out_tokens": 467,
+        "raw": "{\"\": [{\"type\": \"person\", \"description\": \"woman working\", \"bbox\": [0.25, 0.38, 0.6, 0.9], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"chair\", \"description\": \"office chair\", \"bbox\": [0.17, 0.46, 0.4, 0.95], \"reading\": null, \"confidence\": 0.8}, {\"type\": \"computer\", \"description\": \"desktop computer\", \"bbox\": [0.32, 0.3, 0.65, 0.7], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"monitor\", \"description\": \"computer monitor\", \"bbox\": [0.32, 0.3, 0.65, 0.7], \"reading\": null, \"confidence\": 0.8}, {\"type\": \"desk\", \"description\": \"office desk\", \"bbox\": [0.1, 0.14, 0.7, 0.9], \"reading\": null, \"confidence\": 0.9}, {\"type\": \"lamp\", \"description\": \"led light fixture\", \"bbox\": [0.65, 0.03, 0.85, 0.2], \"reading\": null, \"confidence\": 0.7}, {\"type\": \"plant\", \"description\": \"green plant\", \"bbox\": [0.14, 0.39, 0.36, 0.8], \"reading\": null, \"confidence\": 0.6}, {\"type\": \"window\", \"description\": \"glass window\", \"bbox\": [0.75, 0.2, 0.99, 0.9], \"reading\": null, \"confidence\": 0.7}, {\"type\": \"door\", \"description\": \"office door\", \"bbox\": [0.03, 0.18, 0.25, 0.9], \"reading\": null, \"confidence\": 0.6}]}"
+      },
+      "warmup_s": 2.841
+    }
+  }
+}

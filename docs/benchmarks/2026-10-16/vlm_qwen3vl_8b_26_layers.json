@@ -1,0 +1,255 @@
+{
+  "timestamp": "20261016_133238",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [
+    {
+      "model": "qwen3vl-8b-q4@1024",
+      "backend": "llama-server",
+      "load_s": 1.8,
+      "vram_mib": 5118,
+      "warmup_s": 2.649,
+      "first_s": {
+        "mean": 1.685,
+        "min": 1.626,
+        "max": 1.816
+      },
+      "total_s": {
+        "mean": 6.812,
+        "min": 4.568,
+        "max": 11.158
+      },
+      "pieces_per_s": {
+        "mean": 15.593,
+        "min": 15.463,
+        "max": 15.784
+      },
+      "facts_ok": 8,
+      "facts_n": 8,
+      "commands_ok": 8,
+      "commands_n": 8,
+      "command_s": {
+        "mean": 2.088,
+        "min": 1.2,
+        "max": 4.593
+      },
+      "detect": {
+        "ok": true,
+        "objects": 25,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 89.70182466192637,
+        "out_tokens": 1360
+      }
+    }
+  ],
+  "detail": {
+    "qwen3vl-8b-q4@1024": {
+      "ask": [
+        {
+          "first_s": 1.6293436279520392,
+          "total_s": 4.7122109869960696,
+          "pieces": 49,
+          "pieces_per_s": 15.569920599790052,
+          "answer": "En la imagen se observa un espacio de oficina moderno con varias personas trabajando en sus escritorios. Hay computadoras, sillas ergonómicas y plantas decorativas que dan un ambiente profesional y acogedor.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 1.8156543420627713,
+          "total_s": 10.976954380050302,
+          "pieces": 144,
+          "pieces_per_s": 15.60913837632731,
+          "answer": "Este aparato es un **analizador de potencia** modelo **C.A 8220**, fabricado por **Chauvin Arnoux**.\n\nEstá midiendo los siguientes parámetros eléctricos en una carga o sistema:\n\n- **Potencia activa**: 17.84 kW\n- **Potencia reactiva**: 12.26 kVAR\n- **Potencia aparente**: 21.65 kVA\n\nEsto indica que el dispositivo está analizando un circuito eléctrico trifásico, probablemente para evaluar su consumo energético y eficiencia (por ejemplo, mediante el factor de potencia).",
+          "image": "fotos/clean/14.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 1.63033389498014,
+          "total_s": 4.605255068978295,
+          "pieces": 47,
+          "pieces_per_s": 15.46259457294398,
+          "answer": "Una calle urbana con árboles, coches circulando y un ciclista en una calzada marcada como \"SCHOOL\". Hay edificios a ambos lados y el tráfico parece moderado.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": 1.6255885430146009,
+          "total_s": 4.8531094959471375,
+          "pieces": 51,
+          "pieces_per_s": 15.491766197387449,
+          "answer": "En la imagen se observa un espacio de oficina moderno con varias personas trabajando en sus escritorios. Hay computadoras, sillas ergonómicas y plantas decorativas que aportan un ambiente profesional y acogedor.",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 1.781384791014716,
+          "total_s": 11.15780751395505,
+          "pieces": 149,
+          "pieces_per_s": 15.784271291214672,
+          "answer": "Este aparato es un **analizador de potencia** modelo **C.A 8220**, fabricado por Chauvin Arnoux.\n\nEstá midiendo los siguientes parámetros eléctricos en una carga o sistema:\n\n- **Potencia activa**: 17.84 kW\n- **Potencia reactiva**: 12.26 kVAR\n- **Potencia aparente**: 21.65 kVA\n\nEsto indica que el dispositivo está analizando un circuito eléctrico trifásico, probablemente para evaluar su eficiencia energética o el factor de potencia (que se puede calcular como la relación entre kW y kVA).",
+          "image": "fotos/clean/14.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": 1.6270280689932406,
+          "total_s": 4.567756413947791,
+          "pieces": 47,
+          "pieces_per_s": 15.642383315998181,
+          "answer": "Una calle urbana con árboles, coches circulando y un ciclista en una calzada marcada como \"SCHOOL\". Hay edificios a ambos lados y el tráfico parece moderado.",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 2
+        }
+      ],
+      "facts": [
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿Cuántas personas hay en la imagen? Respondé solo con el número.",
+          "answer": "2",
+          "ok": true,
+          "total_s": 1.7046767219435424
+        },
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿De qué marca es la impresora? Respondé solo la marca.",
+          "answer": "HP",
+          "ok": true,
+          "total_s": 1.7175402849679813
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué valor en kW muestra la pantalla? Respondé solo el número.",
+          "answer": "17.84",
+          "ok": true,
+          "total_s": 2.1082048289244995
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué modelo y marca es el instrumento?",
+          "answer": "El instrumento es un analizador de potencia de la marca **Chauvin Arnoux**, modelo **C.A 8220**.",
+          "ok": true,
+          "total_s": 3.6977101779775694
+        },
+        {
+          "image": "fotos/clean/1.jpeg",
+          "question": "¿De qué marca es el manómetro y en qué unidades mide?",
+          "answer": "El manómetro es de la marca **Beyca**.\n\nMide en las siguientes unidades:\n- **Kg/cm²** (kilogramos por centímetro cuadrado)\n- **Lb/pulg²** (libras por pulgada cuadrada, equivalente a psi)",
+          "ok": true,
+          "total_s": 5.552085064002313
+        },
+        {
+          "image": "fotos/clean/5.jpeg",
+          "question": "¿Qué marca tiene el termómetro?",
+          "answer": "La marca del termómetro es **DE WIT**.",
+          "ok": true,
+          "total_s": 2.311579050961882
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿Cuántas bicicletas hay en la calle? Respondé solo con el número.",
+          "answer": "1",
+          "ok": true,
+          "total_s": 1.6987740519689396
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿De qué color es el auto que está en el centro de la calle?",
+          "answer": "El auto que está en el centro de la calle es de color **gris oscuro** (o negro).",
+          "ok": true,
+          "total_s": 3.088270987966098
+        }
+      ],
+      "commands": [
+        {
+          "text": "caminá un metro para adelante",
+          "want": "walk",
+          "got": "walk",
+          "params": {
+            "direction": "forward",
+            "speed": "normal",
+            "duration_s": 10.0,
+            "continuous": false
+          },
+          "ok": true,
+          "elapsed_s": 4.592899999999999
+        },
+        {
+          "text": "girá a la izquierda",
+          "want": "turn",
+          "got": "turn",
+          "params": {
+            "direction": "left",
+            "speed": "slow",
+            "duration_s": null
+          },
+          "ok": true,
+          "elapsed_s": 1.8555
+        },
+        {
+          "text": "pará",
+          "want": "stop",
+          "got": "stop",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 1.2002000000000002
+        },
+        {
+          "text": "saludá con la mano",
+          "want": "wave_hand",
+          "got": "wave_hand",
+          "params": {
+            "turn": true
+          },
+          "ok": true,
+          "elapsed_s": 1.9182000000000001
+        },
+        {
+          "text": "dame la mano",
+          "want": "shake_hand",
+          "got": "shake_hand",
+          "params": {
+            "on": true
+          },
+          "ok": true,
+          "elapsed_s": 2.0321
+        },
+        {
+          "text": "sentate",
+          "want": "sit",
+          "got": "sit",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 1.2655
+        },
+        {
+          "text": "levantate",
+          "want": "stand_up",
+          "got": "stand_up",
+          "params": {},
+          "ok": true,
+          "elapsed_s": 1.6612
+        },
+        {
+          "text": "bailá algo",
+          "want": "dance",
+          "got": "dance",
+          "params": {
+            "name": "Waist_Drum_Dance"
+          },
+          "ok": true,
+          "elapsed_s": 2.1808
+        }
+      ],
+      "detect": {
+        "ok": true,
+        "objects": 25,
+        "people": 2,
+        "finish": "stop",
+        "elapsed_s": 89.70182466192637,
+        "out_tokens": 1360,
+        "raw": "{\"objects\": [{\"type\": \"person\", \"description\": \"woman sitting at a desk with a laptop and monitor\", \"bbox\": [573, 468, 681, 690], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"person\", \"description\": \"woman sitting at a desk with a laptop\", \"bbox\": [402, 397, 470, 475], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"chair\", \"description\": \"black office chair with wheels\", \"bbox\": [612, 497, 752, 943], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"chair\", \"description\": \"gray fabric chair with metal legs\", \"bbox\": [275, 558, 461, 910], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"chair\", \"description\": \"black office chair with wheels\", \"bbox\": [381, 521, 512, 795], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"chair\", \"description\": \"black office chair with wheels\", \"bbox\": [416, 397, 457, 438], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"chair\", \"description\": \"black office chair with wheels\", \"bbox\": [278, 483, 386, 616], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"chair\", \"description\": \"black office chair with wheels\", \"bbox\": [180, 475, 297, 660], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"desk\", \"description\": \"wooden desk with black metal legs\", \"bbox\": [403, 562, 618, 966], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"desk\", \"description\": \"wooden desk with black metal legs\", \"bbox\": [227, 456, 488, 632], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"monitor\", \"description\": \"computer monitor displaying a spreadsheet\", \"bbox\": [491, 421, 593, 537], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"monitor\", \"description\": \"computer monitor with black frame\", \"bbox\": [692, 413, 793, 497], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"laptop\", \"description\": \"silver laptop on a desk\", \"bbox\": [451, 530, 550, 620], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"printer\", \"description\": \"white HP printer on a black stand\", \"bbox\": [748, 483, 871, 660], \"reading\": \"HP\", \"confidence\": 0.99}, {\"type\": \"plant\", \"description\": \"tall green plant in a black pot\", \"bbox\": [852, 303, 1000, 994], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"plant\", \"description\": \"small potted plant with broad leaves\", \"bbox\": [107, 476, 205, 693], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"plant\", \"description\": \"green leafy plant in a black pot\", \"bbox\": [832, 447, 915, 610], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"lamp\", \"description\": \"long rectangular ceiling light fixture\", \"bbox\": [448, 227, 555, 273], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"lamp\", \"description\": \"long rectangular ceiling light fixture\", \"bbox\": [681, 264, 871, 284], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"lamp\", \"description\": \"ceiling-mounted track lighting with black fixtures\", \"bbox\": [305, 21, 637, 199], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"door\", \"description\": \"glass door with metal handle\", \"bbox\": [0, 184, 115, 684], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"wall\", \"description\": \"white wall with logo on it\", \"bbox\": [87, 183, 372, 670], \"reading\": \"SILK Technologies\", \"confidence\": 0.99}, {\"type\": \"wall\", \"description\": \"gray panelled wall\", \"bbox\": [354, 163, 892, 483], \"reading\": null, \"confidence\": 0.99}, {\"type\": \"floor\", \"description\": \"light-colored office floor with black mats\", \"bbox\": [0, 637, 999, 995], \"reading\": null, \"confidence\": 0.98}, {\"type\": \"ceiling\", \"description\": \"exposed ceiling with track lighting and beams\", \"bbox\": [0, 0, 1000, 243], \"reading\": null, \"confidence\": 0.99}]}"
+      },
+      "warmup_s": 2.649
+    }
+  }
+}

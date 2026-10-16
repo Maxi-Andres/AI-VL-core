@@ -421,6 +421,7 @@ def main():
     with open(out, "w", encoding="utf-8") as fh:
         json.dump({"timestamp": stamp, "max_side": MAX_SIDE, "runs": args.runs,
                    "summary": rows, "detail": detail}, fh, indent=2, ensure_ascii=False)
+        fh.write("\n")  # pre-commit's end-of-file-fixer
     print(f"\n[OK] Saved to {out}")
 
 

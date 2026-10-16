@@ -1,0 +1,11 @@
+{
+  "timestamp": "20261016_143941",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [],
+  "detail": {
+    "minicpm-v4.5-q4": {
+      "error": "Response ended prematurely"
+    }
+  }
+}

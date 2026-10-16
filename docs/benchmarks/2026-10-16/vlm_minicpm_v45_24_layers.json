@@ -1,0 +1,240 @@
+{
+  "timestamp": "20261016_144209",
+  "max_side": 768,
+  "runs": 2,
+  "summary": [
+    {
+      "model": "minicpm-v4.5-q4",
+      "backend": "llama-server",
+      "load_s": 3.14,
+      "vram_mib": 5117,
+      "warmup_s": 15.395,
+      "first_s": {
+        "mean": null,
+        "min": null,
+        "max": null
+      },
+      "total_s": {
+        "mean": 6.886,
+        "min": 3.564,
+        "max": 15.432
+      },
+      "pieces_per_s": {
+        "mean": null,
+        "min": null,
+        "max": null
+      },
+      "facts_ok": 5,
+      "facts_n": 8,
+      "commands_ok": 0,
+      "commands_n": 8,
+      "command_s": {
+        "mean": 1.877,
+        "min": 0.584,
+        "max": 4.652
+      },
+      "detect": {
+        "ok": false,
+        "objects": 0,
+        "people": 0,
+        "finish": "length",
+        "elapsed_s": 152.90040534897707,
+        "out_tokens": 2048
+      }
+    }
+  ],
+  "detail": {
+    "minicpm-v4.5-q4": {
+      "ask": [
+        {
+          "first_s": null,
+          "total_s": 5.524702262016945,
+          "pieces": 0,
+          "pieces_per_s": null,
+          "answer": "",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": null,
+          "total_s": 6.031893700012006,
+          "pieces": 0,
+          "pieces_per_s": null,
+          "answer": "",
+          "image": "fotos/clean/14.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": null,
+          "total_s": 3.5644573209574446,
+          "pieces": 0,
+          "pieces_per_s": null,
+          "answer": "",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 1
+        },
+        {
+          "first_s": null,
+          "total_s": 5.500311785028316,
+          "pieces": 0,
+          "pieces_per_s": null,
+          "answer": "",
+          "image": "fotos/ciudad/101.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": null,
+          "total_s": 15.43199041299522,
+          "pieces": 0,
+          "pieces_per_s": null,
+          "answer": "",
+          "image": "fotos/clean/14.jpeg",
+          "run": 2
+        },
+        {
+          "first_s": null,
+          "total_s": 5.262456845026463,
+          "pieces": 0,
+          "pieces_per_s": null,
+          "answer": "",
+          "image": "fotos/ciudad/100.jpeg",
+          "run": 2
+        }
+      ],
+      "facts": [
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿Cuántas personas hay en la imagen? Respondé solo con el número.",
+          "answer": "",
+          "ok": false,
+          "total_s": 16.470979099045508
+        },
+        {
+          "image": "fotos/ciudad/101.jpeg",
+          "question": "¿De qué marca es la impresora? Respondé solo la marca.",
+          "answer": "HP",
+          "ok": true,
+          "total_s": 10.056866633007303
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué valor en kW muestra la pantalla? Respondé solo el número.",
+          "answer": "1784",
+          "ok": false,
+          "total_s": 4.201180264935829
+        },
+        {
+          "image": "fotos/clean/14.jpeg",
+          "question": "¿Qué modelo y marca es el instrumento?",
+          "answer": "El modelo es C.A 8220 y la marca es CHAUVEIN (o Chauvin Arnoux).",
+          "ok": true,
+          "total_s": 14.726182781974785
+        },
+        {
+          "image": "fotos/clean/1.jpeg",
+          "question": "¿De qué marca es el manómetro y en qué unidades mide?",
+          "answer": "El manómetro es de la marca BEYCA y mide en unidades Kg/cm² (kilogramos por centímetro cuadrado) y Lb/pulg² (libras por pulgada cuadrada).",
+          "ok": true,
+          "total_s": 9.446144247893244
+        },
+        {
+          "image": "fotos/clean/5.jpeg",
+          "question": "¿Qué marca tiene el termómetro?",
+          "answer": "The temperature gauge in the image shows that its brand is DE WIT (De Wit).",
+          "ok": true,
+          "total_s": 6.886877721990459
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿Cuántas bicicletas hay en la calle? Respondé solo con el número.",
+          "answer": "1",
+          "ok": true,
+          "total_s": 4.447030875948258
+        },
+        {
+          "image": "fotos/ciudad/100.jpeg",
+          "question": "¿De qué color es el auto que está en el centro de la calle?",
+          "answer": "",
+          "ok": false,
+          "total_s": 14.548974744044244
+        }
+      ],
+      "commands": [
+        {
+          "text": "caminá un metro para adelante",
+          "want": "walk",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 4.652399999999999
+        },
+        {
+          "text": "girá a la izquierda",
+          "want": "turn",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 2.1625
+        },
+        {
+          "text": "pará",
+          "want": "stop",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 0.598
+        },
+        {
+          "text": "saludá con la mano",
+          "want": "wave_hand",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 2.0985
+        },
+        {
+          "text": "dame la mano",
+          "want": "shake_hand",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 1.8956
+        },
+        {
+          "text": "sentate",
+          "want": "sit",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 0.5839
+        },
+        {
+          "text": "levantate",
+          "want": "stand_up",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 1.5526
+        },
+        {
+          "text": "bailá algo",
+          "want": "dance",
+          "got": "unknown",
+          "params": {},
+          "ok": false,
+          "elapsed_s": 1.4705
+        }
+      ],
+      "detect": {
+        "ok": false,
+        "objects": 0,
+        "people": 0,
+        "finish": "length",
+        "elapsed_s": 152.90040534897707,
+        "out_tokens": 2048,
+        "raw": ""
+      },
+      "warmup_s": 15.395
+    }
+  }
+}

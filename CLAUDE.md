@@ -90,7 +90,8 @@ at `http://localhost:11434` with the target models pulled
 encoder on the CPU (~6.5 s per photo), so `config.json` sets `vlm_backend` = `"llamacpp"`
 and `../linux/run.sh` starts a llama-server on `:8081` with the GGUF files in
 `vlm_models/` (git-ignored; `../linux/install.sh` downloads them). `vlm_common` translates
-the same Ollama-style payloads for it. Which model: `src/vlm_server_benchmark.py`. The CLI
+the same Ollama-style payloads for it. Which model, which Whisper, which voice, measured:
+`docs/MODEL_BENCHMARKS.md` (scripts `src/{vlm_server,asr,tts}_benchmark.py`). The CLI
 (`menu.py`, `vlm_scan.py`, `vlm_benchmark.py`) is an Ollama tool and stays on Ollama unless
 `VLM_BACKEND=llamacpp` is set.
 

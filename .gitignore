@@ -25,3 +25,9 @@ kokoro_models/
 # VLM weights for llama-server (GGUF model + vision projector; downloaded by the installer,
 # several GB each)
 vlm_models/
+
+# Speech test clips downloaded by src/asr_benchmark.py --fetch (OpenSLR 61)
+asr_data/
+
+# Voice samples written by src/tts_benchmark.py (listen, do not commit)
+results/tts_samples/
