@@ -22,6 +22,9 @@ piper_voices/
 # Kokoro TTS model files (downloaded by the installer; ~340 MB)
 kokoro_models/
 
+# Supertonic 3 TTS model files (downloaded by the installer; ~380 MB)
+supertonic_models/
+
 # VLM weights for llama-server (GGUF model + vision projector; downloaded by the installer,
 # several GB each)
 vlm_models/

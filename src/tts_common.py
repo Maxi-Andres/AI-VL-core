@@ -6,7 +6,7 @@ The browser can already read answers aloud with its own OS voices, but those var
 per device and often sound robotic. This module adds LOCAL **neural** TTS so the
 assistant speaks with a nicer, uniform voice on every device and stays fully
 offline — the same local-first choice we made for Whisper (STT). Two engines sit
-behind one contract; `service.py` exposes `/speak` (text -> WAV) and `/tts/voices`
+behind one contract (three, counting Supertonic); `service.py` exposes `/speak` (text -> WAV) and `/tts/voices`
 (list installed voices), and the engine is chosen per request from the voice name:
 
   - **Piper** (`es_AR-daniela-high`, …): `<name>.onnx` (+ `.onnx.json`) files in a
@@ -16,6 +16,12 @@ behind one contract; `service.py` exposes `/speak` (text -> WAV) and `/tts/voice
     (`kokoro-v1.0.onnx` + `voices-v1.0.bin`) that runs on CPU and sounds a notch
     better than Piper. Phonemization ships in-process via `espeakng-loader` (no
     system espeak-ng needed). The installer downloads the model files.
+  - **Supertonic 3** (`supertonic-M1`, …): Supertone's 66M-param ONNX model, CPU,
+    ~0.5 s per sentence. Its 10 voices all came back word for word through Whisper
+    (2026-10-19, results/tts_samples/new_2026-10-19/); the app offers the five that were
+    picked by ear: M1, M2, M3, F2, F4. Model files in supertonic_models/ (the installer
+    downloads them; ~380 MB). License: BigScience Open RAIL-M (use-based restrictions,
+    commercial use allowed).
 
 Both engines are imported LAZILY so the rest of iacore keeps working when a TTS
 package is not installed — exactly like the YOLO/ASR paths. When a voice can't be
@@ -31,6 +37,8 @@ Config via env:
     KOKORO_MODEL / KOKORO_VOICES  explicit paths to the .onnx / .bin (override
                      KOKORO_MODELS_DIR).
     KOKORO_LANG      Kokoro phonemizer language (default "es").
+    SUPERTONIC_MODELS_DIR  folder holding the Supertonic 3 files (default:
+                     supertonic_models/ at the repo root).
 """
 import io
 import os
@@ -58,6 +66,13 @@ KOKORO_LANG = os.environ.get("KOKORO_LANG", "es")
 # Spanish voices shipped in Kokoro v1.0. Listed as a constant so /tts/voices does
 # not have to load the ~310 MB model just to enumerate them.
 KOKORO_VOICE_NAMES = ("ef_dora", "em_alex", "em_santa")
+
+SUPERTONIC_MODELS_DIR = os.environ.get("SUPERTONIC_MODELS_DIR") or os.path.join(
+    _REPO_ROOT, "supertonic_models"
+)
+SUPERTONIC_PREFIX = "supertonic-"
+# The five of its ten voices that were chosen by ear (2026-10-19).
+SUPERTONIC_VOICE_NAMES = tuple(SUPERTONIC_PREFIX + v for v in ("M1", "M2", "M3", "F2", "F4"))
 
 
 # --------------------------------------------------------------------------- #
@@ -225,12 +240,90 @@ def _synthesize_kokoro(text, voice):
 
 
 # --------------------------------------------------------------------------- #
+# Supertonic engine (lazy import + cached model)
+# --------------------------------------------------------------------------- #
+_SUPERTONIC_CACHE = {}
+
+
+def _supertonic_files_present():
+    return os.path.exists(os.path.join(SUPERTONIC_MODELS_DIR, "onnx", "vocoder.onnx"))
+
+
+def _load_supertonic():
+    """Load (and cache) the Supertonic 3 model. Never downloads: a missing model is an
+    error naming the installer, like Kokoro's."""
+    try:
+        from supertonic import TTS
+    except ImportError as e:
+        raise ImportError(
+            "The Supertonic text-to-speech path needs the 'supertonic' package, which is "
+            "not installed. Install it with:  pip install supertonic\n"
+            "(Piper, Kokoro and the browser's own voices work without it)."
+        ) from e
+    if not _supertonic_files_present():
+        raise FileNotFoundError(
+            f"Supertonic model files not found in {SUPERTONIC_MODELS_DIR} — run the "
+            f"installer to download them."
+        )
+    if "instance" not in _SUPERTONIC_CACHE:
+        _SUPERTONIC_CACHE["instance"] = TTS(model="supertonic-3",
+                                            model_dir=SUPERTONIC_MODELS_DIR,
+                                            auto_download=False)
+    return _SUPERTONIC_CACHE["instance"]
+
+
+def supertonic_available():
+    """True if supertonic is importable AND its model files are present."""
+    try:
+        import supertonic  # noqa: F401
+    except ImportError:
+        return False
+    return _supertonic_files_present()
+
+
+def supertonic_voices():
+    """The Supertonic voices the app offers, if the engine is usable (else empty)."""
+    return list(SUPERTONIC_VOICE_NAMES) if supertonic_available() else []
+
+
+def _halve_rate(samples):
+    """Float samples at 2·r down to r: a windowed-sinc low-pass at 0.45·r, then every other
+    sample. Supertonic speaks at 44.1 kHz, and the G1's sender resamples to 16 kHz linearly,
+    with no filter — the top of a 44.1 kHz voice would fold back as hiss. At 22.05 kHz it
+    arrives like a Piper voice, which the sender already handles, in half the bytes."""
+    import numpy as np
+
+    n = np.arange(-31, 32)
+    taps = 0.45 * np.sinc(0.45 * n) * np.hamming(len(n))
+    taps /= taps.sum()
+    return np.convolve(samples, taps, mode="same")[::2].astype(np.float32)
+
+
+def _synthesize_supertonic(text, voice):
+    """Synthesize with Supertonic 3 in Spanish. Returns (pcm_bytes, sample_rate). It is
+    levelled like Kokoro so a voice change never changes the loudness on the robot."""
+    import numpy as np
+
+    tts = _load_supertonic()
+    name = voice if voice in SUPERTONIC_VOICE_NAMES else SUPERTONIC_VOICE_NAMES[0]
+    style = tts.get_voice_style(name[len(SUPERTONIC_PREFIX):])
+    samples, _duration = tts.synthesize(text, voice_style=style, lang="es")
+    samples = np.asarray(samples, dtype=np.float32).reshape(-1)
+    rate = int(tts.sample_rate)
+    if rate >= 44100:
+        samples, rate = _halve_rate(samples), rate // 2
+    samples = _level_like_piper(samples)
+    pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
+    return pcm, rate
+
+
+# --------------------------------------------------------------------------- #
 # Public API (engine-agnostic)
 # --------------------------------------------------------------------------- #
 def list_voices():
-    """All installed neural voices across engines (Piper first, then Kokoro). The
+    """All installed neural voices across engines (Piper, Kokoro, Supertonic). The
     names are engine-routable: synthesize() picks the engine from the name."""
-    return piper_voices() + kokoro_voices()
+    return piper_voices() + kokoro_voices() + supertonic_voices()
 
 
 def _pcm_to_wav(pcm, sample_rate):
@@ -247,6 +340,10 @@ def _pcm_to_wav(pcm, sample_rate):
 def _pick_engine(name):
     """Decide which engine serves `name` (already stripped of any prefix), with a
     graceful fallback to whatever engine is actually available."""
+    if name.startswith(SUPERTONIC_PREFIX):
+        if supertonic_available() or not (piper_available() or kokoro_available()):
+            return "supertonic"
+        return "kokoro" if kokoro_available() else "piper"
     engine = "kokoro" if name in KOKORO_VOICE_NAMES else "piper"
     if engine == "piper" and not piper_available() and kokoro_available():
         return "kokoro"
@@ -259,7 +356,7 @@ def synthesize(text, voice=None):
     """Synthesize `text` into a WAV (16-bit mono) and return {wav, elapsed, ...}.
 
     The engine is chosen from the voice name: a Kokoro voice (ef_*/em_*) uses
-    Kokoro, anything else uses Piper. An explicit "kokoro:" / "piper:" prefix on the
+    Kokoro, a "supertonic-*" one Supertonic, anything else uses Piper. An explicit "kokoro:" / "piper:" prefix on the
     voice forces the engine.
     """
     name = voice or TTS_VOICE
@@ -272,7 +369,9 @@ def synthesize(text, voice=None):
         engine = _pick_engine(name)
 
     t0 = time.perf_counter()
-    if engine == "kokoro":
+    if engine == "supertonic":
+        pcm, sample_rate = _synthesize_supertonic(text, name)
+    elif engine == "kokoro":
         pcm, sample_rate = _synthesize_kokoro(text, name)
     else:
         pcm, sample_rate = _synthesize_piper(text, name)

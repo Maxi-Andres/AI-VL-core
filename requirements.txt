@@ -28,3 +28,8 @@ piper-tts>=1.3
 # no system espeak-ng is required. The installer downloads the model files into
 # kokoro_models/. Optional — Piper and browser voices work without it.
 kokoro-onnx>=0.4
+
+# Third TTS engine: Supertonic 3 (66M-param ONNX, CPU, offline), five of its voices in the
+# picker. The installer downloads the model (~380 MB) into supertonic_models/. Optional —
+# the other engines work without it.
+supertonic>=1.3
