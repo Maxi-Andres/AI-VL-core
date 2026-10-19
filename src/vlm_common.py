@@ -443,18 +443,45 @@ DEFAULT_CONFIG = {
     "llamacpp_image_min_tokens": 1024,
     # Who the spoken assistant is, by robot id, appended to every free question (persona_for).
     "assistant_robot": "g1",
-    # Facts go in ONE "only for questions about yourself" sentence: listed as plain sentences
-    # they made it misread 17.84 kW as 1784 once in two (2026-10-19).
+    # Each robot: an identity that always goes, and facts that go only when the question
+    # mentions one of their keywords (persona_for). Keywords are matched without accents.
     "assistant_persona": {
-        "g1": "You are Bender, a Unitree G1 humanoid robot made by Maxi. "
-              "The image is what your own camera sees in front of you. "
-              "Facts about you, only for questions about yourself: you work at Silk Technologies, "
-              "your best friend is Mateo, your brother is Huesos, a Unitree Go2 robot dog, "
-              "and you are 130 cm tall.",
-        "go2": "You are Huesos, a Unitree Go2 robot dog made by Maxi. "
-               "The image is what your own camera sees in front of you. "
-               "Facts about you, only for questions about yourself: you work at Silk Technologies "
-               "and your brother is Bender, a Unitree G1 humanoid robot.",
+        "g1": {
+            "identity": "You are Bender, a Unitree G1 humanoid robot. "
+                        "The image is what your own camera sees in front of you.",
+            "facts": [
+                # "made by Maxi" in the identity came back as "Maxi, la empresa que fabrica
+                # los robots Unitree": who Maxi is has to be said, and only when asked.
+                {"about": ["cre", "hizo", "fabric", "program", "disen", "construy", "dueno",
+                           "papa", "padre", "maxi", "made", "built", "creator"],
+                 "fact": "your creator is Maxi, an engineer at Silk Technologies who "
+                         "designed and programmed you"},
+                {"about": ["trabaj", "empresa", "silk", "work"],
+                 "fact": "you work at Silk Technologies"},
+                {"about": ["amigo", "amiga", "friend", "mateo"],
+                 "fact": "your best friend is Mateo"},
+                {"about": ["hermano", "hermana", "familia", "perro", "huesos", "go2",
+                           "brother", "family"],
+                 "fact": "your brother is Huesos, a Unitree Go2 robot dog"},
+                {"about": ["medis", "mides", "altura", "alto", "mide", "tall", "height"],
+                 "fact": "you are 130 cm tall"},
+            ],
+        },
+        "go2": {
+            "identity": "You are Huesos, a Unitree Go2 robot dog. "
+                        "The image is what your own camera sees in front of you.",
+            "facts": [
+                {"about": ["cre", "hizo", "fabric", "program", "disen", "construy", "dueno",
+                           "papa", "padre", "maxi", "made", "built", "creator"],
+                 "fact": "your creator is Maxi, an engineer at Silk Technologies who "
+                         "programmed you"},
+                {"about": ["trabaj", "empresa", "silk", "work"],
+                 "fact": "you work at Silk Technologies"},
+                {"about": ["hermano", "hermana", "familia", "bender", "g1", "brother",
+                           "family"],
+                 "fact": "your brother is Bender, a Unitree G1 humanoid robot"},
+            ],
+        },
     },
 
     # --- Benchmark: has its OWN config, independent of the smoke test ---------
@@ -759,28 +786,52 @@ FREE_PROMPT_SYSTEM = ("You are a helpful visual assistant. Answer the user's que
                       "the image clearly and concisely, in plain text.")
 
 
-def persona_for(robot=None, cfg=None):
+def _plain(text):
+    """Lower case without accents, for matching a question against fact keywords."""
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", (text or "").lower())
+                   if unicodedata.category(c) != "Mn")
+
+
+def persona_for(robot=None, cfg=None, question=None):
     """Who the assistant is, for `robot` (config.json `assistant_persona`, by robot id), or ""
     when that robot has none. A missing robot is the configured default (`assistant_robot`),
     so the identity holds however the page asks.
 
-    Measured 2026-10-19 on the live G1 camera and the reading set: this short form, after the
-    plain instruction, made it answer "Sí, estoy viendo tu mano…" (it said "parece que te
-    están viendo") and "Soy Bender… fabricado por Maxi" (it said "Soy Qwen"), with 17.84 kW
-    and Chauvin Arnoux still read right. A longer one read 17.84 as 1784; adding "speak of
-    yourself as I and of the person as you" broke both again. Facts about the robot (where it
-    works, its friend, its brother, its height) are safe in one sentence that says they are
-    "only for questions about yourself": 17.84 kW, Chauvin Arnoux and BEYCA still read right,
-    and it answered "Trabajo en Silk Technologies, y mi mejor amigo es Mateo".
+    An entry is {"identity": "...", "facts": [{"about": [keywords], "fact": "..."}]} (a plain
+    string is an identity with no facts). The identity always goes; a fact only when the
+    question mentions one of its keywords — and only that fact.
+
+    Measured 2026-10-19 on the live G1 camera and the reading set:
+      - the short identity made it answer "Sí, estoy viendo tu mano…" (it said "parece que te
+        están viendo") and "Soy Bender… fabricado por Maxi" (it said "Soy Qwen"), and still
+        read 17.84 kW 6/6 at 1500 px (5/6 at 1152; 6/6 with no identity);
+      - with every fact on every question it recited them all ("¿Quién te creó?" -> creator,
+        work, best friend, brother) and the reading wobbled — and no wording ("only the one
+        asked", "each only when that exact thing is asked") made the 4B model stop. So the
+        choice of facts is made HERE, by keyword, not left to the model;
+      - a longer identity read 17.84 as 1784; "speak of yourself as I and of the person as
+        you" broke both again. Keep the identity short.
     """
     cfg = cfg if cfg is not None else load_config()
     personas = cfg.get("assistant_persona") or {}
     key = (robot or cfg.get("assistant_robot") or "").strip().lower()
-    return str(personas.get(key) or "").strip()
+    entry = personas.get(key) or ""
+    if isinstance(entry, str):
+        return entry.strip()
+    identity = str(entry.get("identity") or "").strip()
+    asked = _plain(question)
+    facts = [str(f.get("fact") or "").strip() for f in entry.get("facts") or []
+             if asked and any(re.search(r"\b" + re.escape(_plain(k)), asked)
+                              for k in f.get("about") or [])]
+    facts = [f for f in facts if f]
+    if not facts:
+        return identity
+    return f"{identity} About yourself, since it was asked: {'; '.join(facts)}."
 
 
-def free_prompt_system(robot=None):
-    persona = persona_for(robot)
+def free_prompt_system(robot=None, question=None):
+    persona = persona_for(robot, question=question)
     return f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
 
 
@@ -808,7 +859,7 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     # scope/variant prompts: use a neutral system message and DON'T force JSON, so
     # the model answers in plain text instead of the {objects:[...]} contract.
     if prompt:
-        system_msg = free_prompt_system(robot)
+        system_msg = free_prompt_system(robot, question=prompt)
         user_msg = prompt
         force_json = False
     else:
@@ -877,7 +928,7 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     For the fastest time-to-first-word use an instruct model (no thinking), so the
     answer starts immediately instead of after a reasoning block.
     """
-    system_msg = free_prompt_system(robot)
+    system_msg = free_prompt_system(robot, question=prompt)
     supports_think = model_supports_thinking(model, url)
     payload = {
         "model": model,

@@ -16,14 +16,36 @@ def test_the_g1_is_bender_made_by_maxi_and_sees_through_its_own_camera():
     """Catches: "parece que te están viendo" / "Soy Qwen" (2026-10-19) — the model not knowing
     it is the robot and that the image is its own view."""
     persona = vc.persona_for("g1")
-    assert "Bender" in persona and "Maxi" in persona and "your own camera" in persona
+    assert "Bender" in persona and "your own camera" in persona
+    creator = vc.persona_for("g1", question="¿Quién te creó?")
+    assert "Maxi, an engineer" in creator, "Maxi alone came back as 'la empresa de Unitree'"
 
 
-def test_bender_knows_his_facts_and_his_brother_knows_him():
-    g1, go2 = vc.persona_for("g1"), vc.persona_for("go2")
-    for fact in ("Silk Technologies", "Mateo", "Huesos", "130 cm"):
-        assert fact in g1
-    assert "Huesos" in go2 and "Bender" in go2
+def test_a_question_about_the_image_carries_only_the_short_identity():
+    """Catches: every fact riding on every question — it recited them all and the reading of
+    the gauges wobbled (2026-10-19)."""
+    persona = vc.persona_for("g1", question="¿Qué valor muestra la pantalla?")
+    for fact in ("Silk", "Mateo", "Huesos", "130"):
+        assert fact not in persona
+
+
+def test_only_the_fact_asked_about_is_added():
+    """Catches: "¿Quién es tu mejor amigo?" answered with the creator, the job and the brother."""
+    friend = vc.persona_for("g1", question="¿Quién es tu mejor amigo?")
+    assert "Mateo" in friend and "Huesos" not in friend and "130" not in friend
+    assert "130 cm" in vc.persona_for("g1", question="¿Cuánto medís?")
+    both = vc.persona_for("g1", question="¿Tenés hermanos y dónde trabajás?")
+    assert "Huesos" in both and "Silk Technologies" in both
+
+
+def test_keywords_match_whole_words_not_pieces():
+    assert "130" not in vc.persona_for("g1", question="¿Dio un salto la presión?")
+    assert "130" in vc.persona_for("g1", question="¿Qué tan alto sos?")
+
+
+def test_huesos_knows_his_brother():
+    assert "Huesos" in vc.persona_for("go2")
+    assert "Bender" in vc.persona_for("go2", question="¿Tenés hermano?")
 
 
 def test_the_identity_holds_when_the_page_does_not_say_which_robot():
