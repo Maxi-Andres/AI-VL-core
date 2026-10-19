@@ -26,6 +26,9 @@ the browser never talks to iacore directly. Endpoints:
     POST /transcribe         raw audio bytes in body -> {text, ...} (speech-to-text).
     GET  /tts/voices         installed Piper voices (for the UI voice picker).
     POST /speak              {text, voice} -> WAV audio (neural text-to-speech).
+    WS   /ws/ear             a live mic stream in (binary 16 kHz s16le), JSON events out:
+                             speech / heard / wake / command ("Bender, ..."); a text
+                             {"type": "mute", "on": bool} silences it while the robot talks.
 
 Run (from the iacore repo root, venv active):
     uvicorn service:app --host 0.0.0.0 --port 8001
@@ -36,6 +39,7 @@ VLM_BACKEND ("ollama" | "llamacpp", overrides config.json's vlm_backend), VLM_UR
 """
 import base64
 import io
+import json
 import logging
 import os
 import sys
@@ -47,7 +51,7 @@ from contextlib import asynccontextmanager
 # cross-app dependency). Put it on the path like menu.py does.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -56,6 +60,7 @@ from pydantic import BaseModel
 
 import asr_common
 import command_common
+import ear_common
 import tts_common
 import vlm_common
 import yolo_common
@@ -443,3 +448,35 @@ async def speak(req: SpeakRequest):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
     return Response(content=res["wav"], media_type="audio/wav")
+
+
+@app.websocket("/ws/ear")
+async def ear(ws: WebSocket):
+    """The robot's ear (src/ear_common.py): the backend sends the robot's microphone as binary
+    frames of 16 kHz mono s16le, and gets back one JSON event per thing heard — the browser's
+    voice assistant answers the "command" ones. A text frame {"type": "mute", "on": true}
+    makes it deaf while the robot itself is speaking, so it does not answer its own voice."""
+    await ws.accept()
+
+    def transcribe(wav):
+        return asr_common.transcribe(wav, language="es")["text"]
+
+    listener = ear_common.Ear(transcribe)
+    try:
+        while True:
+            msg = await ws.receive()
+            if msg["type"] == "websocket.disconnect":
+                break
+            if msg.get("bytes") is not None:
+                # Transcription blocks for ~0.2 s: in a thread, so the event loop stays free.
+                for event in await run_in_threadpool(listener.feed, msg["bytes"]):
+                    await ws.send_json(event)
+            elif msg.get("text"):
+                try:
+                    control = json.loads(msg["text"])
+                except ValueError:
+                    continue
+                if isinstance(control, dict) and control.get("type") == "mute":
+                    listener.mute(bool(control.get("on")))
+    except WebSocketDisconnect:
+        pass
