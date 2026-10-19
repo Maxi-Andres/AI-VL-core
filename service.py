@@ -150,6 +150,7 @@ class VlmRequest(BaseModel):
     num_ctx: int = CFG.get("num_ctx", 16384)
     think: bool = CFG.get("think", True)
     prompt: str | None = None
+    robot: str | None = None        # whose identity answers (persona_for)
 
 
 class VlmStreamRequest(BaseModel):
@@ -158,6 +159,7 @@ class VlmStreamRequest(BaseModel):
     model: str | None = None
     max_tokens: int = CFG.get("max_tokens", 8192)
     num_ctx: int = CFG.get("num_ctx", 16384)
+    robot: str | None = None        # whose identity answers (persona_for)
 
 
 class SpeakRequest(BaseModel):
@@ -293,6 +295,7 @@ async def vlm(req: VlmRequest):
             prompt=req.prompt,
             url=vlm_url(),
             size=size,
+            robot=req.robot,
         )
 
     try:
@@ -363,6 +366,7 @@ async def vlm_stream(req: VlmStreamRequest):
                 max_tokens=req.max_tokens,
                 num_ctx=req.num_ctx,
                 url=vlm_url(),
+                robot=req.robot,
             )
         except Exception as e:
             # Surface the error inline so the client sees why the stream stopped.

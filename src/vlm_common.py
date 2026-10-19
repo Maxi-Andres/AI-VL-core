@@ -441,6 +441,14 @@ DEFAULT_CONFIG = {
     "llamacpp_alias": "qwen3vl-4b-q4",
     "llamacpp_repo": "Qwen/Qwen3-VL-4B-Instruct-GGUF",   # where install.sh gets both files
     "llamacpp_image_min_tokens": 1024,
+    # Who the spoken assistant is, by robot id, appended to every free question (persona_for).
+    "assistant_robot": "g1",
+    "assistant_persona": {
+        "g1": "You are Bender, a Unitree G1 humanoid robot made by Maxi. "
+              "The image is what your own camera sees in front of you.",
+        "go2": "You are a Unitree Go2 robot dog made by Maxi. "
+               "The image is what your own camera sees in front of you.",
+    },
 
     # --- Benchmark: has its OWN config, independent of the smoke test ---------
     # This way you can run the benchmark with a lighter (faster) context without
@@ -736,9 +744,39 @@ def stream_chat(payload, url=OLLAMA_HOST, timeout=300, verbose=False):
     return "".join(content_buf), "".join(think_buf), done_reason, in_tok, out_tok
 
 
+# The instruction for free questions (the spoken assistant, "Ask anything"). Plain on purpose:
+# rewording it has broken reading before — "Read brands exactly…" made a nameplate read
+# "Fluke" 3 times out of 3 (2026-10-16). The robot's identity is APPENDED to it, never
+# merged in (see persona_for).
+FREE_PROMPT_SYSTEM = ("You are a helpful visual assistant. Answer the user's question about "
+                      "the image clearly and concisely, in plain text.")
+
+
+def persona_for(robot=None, cfg=None):
+    """Who the assistant is, for `robot` (config.json `assistant_persona`, by robot id), or ""
+    when that robot has none. A missing robot is the configured default (`assistant_robot`),
+    so the identity holds however the page asks.
+
+    Measured 2026-10-19 on the live G1 camera and the reading set: this short form, after the
+    plain instruction, made it answer "Sí, estoy viendo tu mano…" (it said "parece que te
+    están viendo") and "Soy Bender… fabricado por Maxi" (it said "Soy Qwen"), with 17.84 kW
+    and Chauvin Arnoux still read right. A longer one read 17.84 as 1784; adding "speak of
+    yourself as I and of the person as you" broke both again. Keep it short.
+    """
+    cfg = cfg if cfg is not None else load_config()
+    personas = cfg.get("assistant_persona") or {}
+    key = (robot or cfg.get("assistant_robot") or "").strip().lower()
+    return str(personas.get(key) or "").strip()
+
+
+def free_prompt_system(robot=None):
+    persona = persona_for(robot)
+    return f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
+
+
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
               think=True, url=OLLAMA_HOST, timeout=300, num_ctx=16384,
-              verbose=False, size=None, variant=None, prompt=None):
+              verbose=False, size=None, variant=None, prompt=None, robot=None):
     """Send an image to the VLM and return a dict with the response + diagnostics.
 
     Uses the native /api/chat endpoint with streaming:
@@ -760,10 +798,7 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     # scope/variant prompts: use a neutral system message and DON'T force JSON, so
     # the model answers in plain text instead of the {objects:[...]} contract.
     if prompt:
-        system_msg = (
-            "You are a helpful visual assistant. Answer the user's question about "
-            "the image clearly and concisely, in plain text."
-        )
+        system_msg = free_prompt_system(robot)
         user_msg = prompt
         force_json = False
     else:
@@ -819,7 +854,7 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
 
 
 def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
-                     url=OLLAMA_HOST):
+                     url=OLLAMA_HOST, robot=None):
     """Stream a FREE-PROMPT answer token by token (a generator of text pieces).
 
     This is the streaming sibling of query_vlm for the "ask anything" case only:
@@ -832,10 +867,7 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     For the fastest time-to-first-word use an instruct model (no thinking), so the
     answer starts immediately instead of after a reasoning block.
     """
-    system_msg = (
-        "You are a helpful visual assistant. Answer the user's question about "
-        "the image clearly and concisely, in plain text."
-    )
+    system_msg = free_prompt_system(robot)
     supports_think = model_supports_thinking(model, url)
     payload = {
         "model": model,
