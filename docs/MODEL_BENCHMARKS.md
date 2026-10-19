@@ -154,6 +154,15 @@ for a robot that reads gauges. Slowing it down (Piper `length_scale` 1.15 and 1.
 fix it; it is the voice model. It is also the only Argentine voice. Choosing a replacement
 is open: listen to the samples first.
 
+**Re-checked 2026-10-19** (same sentence, Whisper back): pocket-tts 3.3 streams on 4 CPU
+threads with the first audio at **0.08 s** and 3.4× real time, and its catalog voices speak
+the `spanish` model too (charles, marius, javert, giovanni understood word for word; rafael
+stopped after the first sentence). Cloning a voice from a recording needs the gated weights
+(accept the terms on Hugging Face). **Supertonic 3** (`supertonic` 1.3.1, 66M, ONNX, CPU,
+OpenRAIL): 10 voices (M1-M5, F1-F5), all ten understood word for word, ~1.3 s for 8 s of audio
+(no streaming: one sentence at a time, like Kokoro). Neither is wired into `tts_common` yet;
+samples in `results/tts_samples/new_2026-10-19/`.
+
 Not viable on this card next to the VLM: Qwen3-TTS (4 s per sentence; the `qwen-tts` 0.1.1
 package does not stream) and Chatterbox Multilingual (3.5-4 GB per NVIDIA's guide; not
 measured). Both are candidates for a bigger GPU.
@@ -161,6 +170,23 @@ measured). Both are candidates for a bigger GPU.
 Raw files: `tts_speed.jsonl`, `tts_intelligibility.jsonl` (what Whisper heard per sample).
 
 ---
+
+## 4. Reading check — 2026-10-19
+
+`src/vlm_reading_check.py`: 57 questions with a known answer over the 33 photos in `fotos/`
+(brand, model, display reading, units, counts, what a thing is), asked through
+`query_vlm_stream` as the voice assistant asks them — with the robot's identity on — 3 times
+each with a fresh frame, at 1152 px. Expected answers read off the photos by eye.
+
+| identity | right | always right | never |
+|---|---:|---:|---:|
+| Bender (G1) | 159/171 (93 %) | 53/57 | 4 |
+| none | same 4 failures, same answers | | |
+
+The identity costs nothing here. The four the model never gets, with or without it: the
+gauge pointer of `clean/1` (says ~250 kg/cm²; it rests on 0), **21.65 kVA** (reads 2165 — the
+decimal point of that display), the cable glands of `clean/25` (says 16; there are 4) and the
+small "Spectra" badge of `clean/31` (reads "EPCIA").
 
 ## Re-running
 
@@ -170,6 +196,7 @@ cd AI-VL-core/src
 ../.venv/bin/python vlm_server_benchmark.py --ollama qwen3-vl:4b-instruct --image-min-tokens 0 1024
 VLM_NGL=26 ../.venv/bin/python vlm_server_benchmark.py --models qwen3vl-8b-q4   # a model that does not fit
 ../.venv/bin/python asr_benchmark.py --fetch && ../.venv/bin/python asr_benchmark.py
+../.venv/bin/python vlm_reading_check.py                                  # needs ../linux/run.sh up (:8081)
 ../.venv/bin/python tts_benchmark.py                                      # + --pocket cuda --qwen 0.6B if installed
 ```
 
