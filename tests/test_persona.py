@@ -43,6 +43,18 @@ def test_keywords_match_whole_words_not_pieces():
     assert "130" in vc.persona_for("g1", question="¿Qué tan alto sos?")
 
 
+def test_it_is_not_the_cartoon_bender():
+    """Catches: the name alone bringing in Futurama's Bender ("¡Ay, qué mierda!")."""
+    assert "not the cartoon character" in vc.persona_for("g1")
+
+
+def test_the_time_is_this_machines_clock_and_only_when_asked():
+    import re
+    assert re.search(r"right now it is \d\d:\d\d on \w+ \d+ de \w+ de 20\d\d",
+                     vc.persona_for("g1", question="¿Qué hora es?"))
+    assert "right now" not in vc.persona_for("g1", question="¿Qué ves?")
+
+
 def test_huesos_knows_his_brother():
     assert "Huesos" in vc.persona_for("go2")
     assert "Bender" in vc.persona_for("go2", question="¿Tenés hermano?")

@@ -447,9 +447,18 @@ DEFAULT_CONFIG = {
     # mentions one of their keywords (persona_for). Keywords are matched without accents.
     "assistant_persona": {
         "g1": {
-            "identity": "You are Bender, a Unitree G1 humanoid robot. "
+            # "not the cartoon character": the model knows Futurama's Bender, and the name alone
+            # brought him in ("¡Ay, qué mierda!", "¡Ay, qué miedo!"). This form answered calm
+            # and short and kept 17.84 kW 6/6; adding "Unitree G1" here lost the name ("Soy
+            # Unitree G1") and read 17.84 right 2/6 — so the model is a fact, asked for.
+            "identity": "You are Bender, a calm and helpful robot, not the cartoon character. "
                         "The image is what your own camera sees in front of you.",
             "facts": [
+                {"about": ["que sos", "que eres", "que robot", "modelo", "unitree", "g1",
+                           "humanoide", "what are you"],
+                 "fact": "you are a Unitree G1 humanoid robot"},
+                {"about": ["hora", "dia", "fecha", "hoy", "time", "date", "today"],
+                 "fact": "right now it is {now}"},
                 # "made by Maxi" in the identity came back as "Maxi, la empresa que fabrica
                 # los robots Unitree": who Maxi is has to be said, and only when asked.
                 {"about": ["cre", "hizo", "fabric", "program", "disen", "construy", "dueno",
@@ -468,9 +477,14 @@ DEFAULT_CONFIG = {
             ],
         },
         "go2": {
-            "identity": "You are Huesos, a Unitree Go2 robot dog. "
+            "identity": "You are Huesos, a calm and helpful robot dog. "
                         "The image is what your own camera sees in front of you.",
             "facts": [
+                {"about": ["que sos", "que eres", "que robot", "modelo", "unitree", "go2",
+                           "what are you"],
+                 "fact": "you are a Unitree Go2 robot dog"},
+                {"about": ["hora", "dia", "fecha", "hoy", "time", "date", "today"],
+                 "fact": "right now it is {now}"},
                 {"about": ["cre", "hizo", "fabric", "program", "disen", "construy", "dueno",
                            "papa", "padre", "maxi", "made", "built", "creator"],
                  "fact": "your creator is Maxi, an engineer at Silk Technologies who "
@@ -793,6 +807,20 @@ def _plain(text):
                    if unicodedata.category(c) != "Mn")
 
 
+_DAYS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+_MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+           "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def _now_text(now=None):
+    """This machine's local time, in words the answer can repeat: "13:19 on lunes 19 de
+    octubre de 2026". The model has no clock; asked the time, it now says "Es 13:19, lunes 19
+    de octubre de 2026" (2026-10-19)."""
+    import datetime
+    now = now or datetime.datetime.now()
+    return f"{now:%H:%M} on {_DAYS[now.weekday()]} {now.day} de {_MONTHS[now.month - 1]} de {now.year}"
+
+
 def persona_for(robot=None, cfg=None, question=None):
     """Who the assistant is, for `robot` (config.json `assistant_persona`, by robot id), or ""
     when that robot has none. A missing robot is the configured default (`assistant_robot`),
@@ -824,7 +852,7 @@ def persona_for(robot=None, cfg=None, question=None):
     facts = [str(f.get("fact") or "").strip() for f in entry.get("facts") or []
              if asked and any(re.search(r"\b" + re.escape(_plain(k)), asked)
                               for k in f.get("about") or [])]
-    facts = [f for f in facts if f]
+    facts = [f.replace("{now}", _now_text()) for f in facts if f]
     if not facts:
         return identity
     return f"{identity} About yourself, since it was asked: {'; '.join(facts)}."
