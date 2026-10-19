@@ -31,7 +31,9 @@ Config via env:
     TTS_VOICES_DIR   folder holding the Piper `<name>.onnx` voices (default:
                      piper_voices/ at the repo root).
     TTS_VOICE        default voice name when the caller doesn't pass one
-                     (default "es_AR-daniela-high").
+                     (default "em_alex": picked 2026-10-19 as the one that
+                     pronounces best; Daniela, the old default, was the least
+                     intelligible voice measured — 34 % word error).
     KOKORO_MODELS_DIR folder holding the Kokoro model files (default:
                      kokoro_models/ at the repo root).
     KOKORO_MODEL / KOKORO_VOICES  explicit paths to the .onnx / .bin (override
@@ -51,7 +53,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TTS_VOICES_DIR = os.environ.get("TTS_VOICES_DIR") or os.path.join(
     _REPO_ROOT, "piper_voices"
 )
-TTS_VOICE = os.environ.get("TTS_VOICE", "es_AR-daniela-high")
+TTS_VOICE = os.environ.get("TTS_VOICE", "em_alex")
 
 KOKORO_MODELS_DIR = os.environ.get("KOKORO_MODELS_DIR") or os.path.join(
     _REPO_ROOT, "kokoro_models"

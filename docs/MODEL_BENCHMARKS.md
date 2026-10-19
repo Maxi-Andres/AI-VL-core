@@ -13,7 +13,7 @@ The budget every choice has to fit: the desktop holds ~1.2-1.4 GB of the 8 GB, t
 |---|---|---|
 | VLM (look at a frame, answer, detect, interpret commands) | Qwen3-VL 4B Instruct Q4_K_M under llama-server, `--image-min-tokens 1024` | `src/vlm_server_benchmark.py` |
 | Speech-to-text | faster-whisper `small`, GPU, `int8_float16` | `src/asr_benchmark.py` |
-| Text-to-speech | Piper `es_AR-daniela-high` for now; **under review** (see TTS below) | `src/tts_benchmark.py` |
+| Text-to-speech | Kokoro `em_alex` (chosen by ear 2026-10-19; was Piper `es_AR-daniela-high`, the least intelligible) | `src/tts_benchmark.py` |
 
 ---
 
