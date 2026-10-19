@@ -11,6 +11,8 @@ import struct
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import ear_common as ec
@@ -119,11 +121,20 @@ def test_talk_without_the_name_is_heard_but_not_obeyed():
     assert "command" not in [e["type"] for e in events], "'vender' is not 'Bender'"
 
 
-def test_whispers_inventions_are_dropped():
-    """Catches: '¡Suscríbete!' — Whisper's favourite invention on noise — reaching the UI."""
-    ear, _ = ear_saying("¡Suscríbete!")
+@pytest.mark.parametrize("invented", ["¡Suscríbete!", "Thank you, thank you, thank you.",
+                                      "¡Gracias!", "Subtítulos realizados por la comunidad"])
+def test_whispers_inventions_are_dropped(invented):
+    """Catches: Whisper's inventions on noise reaching the UI — and, right after a bare
+    "Bender", being obeyed as the command ("Thank you, thank you", 2026-10-19)."""
+    ear, _ = ear_saying(invented)
     events = feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2))
     assert [e["type"] for e in events] == ["speech"]
+
+
+def test_a_real_sentence_with_thanks_in_it_is_kept():
+    ear, _ = ear_saying("Bender, gracias por la ayuda")
+    events = feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2))
+    assert events[-1] == {"type": "command", "text": "gracias por la ayuda"}
 
 
 

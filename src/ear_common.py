@@ -41,9 +41,13 @@ FOLLOW_UP_S = 8.0
 UNMUTE_GUARD_S = 0.4
 
 WAKE = re.compile(r"\bb[eé]nd[eé]r\b", re.IGNORECASE)
-# Whisper's well-known inventions on silence or noise (it learned from subtitled videos).
+# Whisper's well-known inventions on silence or noise (it learned from subtitled videos):
+# anything with these phrases, and an utterance that is nothing but thanks — "Thank you, thank
+# you, thank you" came out of a muddy stretch of the G1's mic on 2026-10-19, in English, with
+# the language forced to Spanish, right while the ear waited for a command.
 HALLUCINATIONS = re.compile(
-    r"suscr[ií]bete|gracias por ver|subt[ií]tulos|amara\.org|thanks for watching",
+    r"suscr[ií]bete|gracias por ver|subt[ií]tulos|amara\.org|thanks for watching"
+    r"|^\W*(?:(?:thank you|thanks|gracias|you)\W*)+$",
     re.IGNORECASE)
 
 
