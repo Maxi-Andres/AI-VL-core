@@ -31,6 +31,8 @@ Config via env:
     ASR_DEVICE        "cpu" (default) or "cuda" (run.sh's; falls back to the CPU).
     ASR_COMPUTE_TYPE  CTranslate2 compute type (default "int8"; run.sh: "int8_float16").
     ASR_CUDA12_DIR    a folder with CUDA 12's libcublas(.Lt).so.12, tried first.
+    ASR_HOTWORDS      names to spell right, comma-separated (default "Bender", the G1).
+    ASR_VAD           "0" turns off skipping the stretches without voice (default on).
     ASR_LANGUAGE      force a language (e.g. "es"/"en"); unset => auto-detect.
 """
 import io
@@ -47,6 +49,14 @@ ASR_MODEL = os.environ.get("ASR_MODEL", "base")
 ASR_DEVICE = os.environ.get("ASR_DEVICE", "cpu")
 ASR_COMPUTE_TYPE = os.environ.get("ASR_COMPUTE_TYPE", "int8")
 ASR_LANGUAGE = os.environ.get("ASR_LANGUAGE") or None
+# Names Whisper must spell right: the G1 is "Bender", which it heard as "vende", "venga",
+# "Déjdenme" and "Bengal" through the robot's own mic (2026-10-19). Comma-separated; "" for none.
+ASR_HOTWORDS = os.environ.get("ASR_HOTWORDS", "Bender").replace(",", " ").strip() or None
+# Skip the stretches with no voice (faster-whisper's Silero VAD). Without it, silence and fan
+# noise came back as "¡Suscríbete!", and with the hotword alone as a phantom "Bender" — which
+# would wake the robot with nobody talking. Cost on 30 Argentine speakers: 1.1 -> 1.5 % WER
+# (one word), same speed. "0" turns it off.
+ASR_VAD = os.environ.get("ASR_VAD", "1") != "0"
 
 # Where a CUDA 12 cuBLAS may live, in order (see the module docstring).
 CUDA12_DIRS = [os.environ["ASR_CUDA12_DIR"]] if os.environ.get("ASR_CUDA12_DIR") else []
@@ -164,7 +174,8 @@ def transcribe(data, language=None, translate=False):
     # transcribe() accepts a binary file-like object; wrap the bytes in BytesIO so
     # nothing touches disk. `segments` is a generator that runs the model lazily as
     # it is consumed, so joining it is what actually does the work.
-    segments, info = model.transcribe(io.BytesIO(data), language=lang, task=task)
+    segments, info = model.transcribe(io.BytesIO(data), language=lang, task=task,
+                                      hotwords=ASR_HOTWORDS, vad_filter=ASR_VAD)
     text = "".join(seg.text for seg in segments).strip()
     elapsed = time.perf_counter() - t0
     return {
