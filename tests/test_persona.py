@@ -19,6 +19,13 @@ def test_the_g1_is_bender_made_by_maxi_and_sees_through_its_own_camera():
     assert "Bender" in persona and "Maxi" in persona and "your own camera" in persona
 
 
+def test_bender_knows_his_facts_and_his_brother_knows_him():
+    g1, go2 = vc.persona_for("g1"), vc.persona_for("go2")
+    for fact in ("Silk Technologies", "Mateo", "Huesos", "130 cm"):
+        assert fact in g1
+    assert "Huesos" in go2 and "Bender" in go2
+
+
 def test_the_identity_holds_when_the_page_does_not_say_which_robot():
     assert vc.persona_for(None) == vc.persona_for("g1")
 

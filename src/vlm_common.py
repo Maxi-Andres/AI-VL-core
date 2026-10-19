@@ -443,11 +443,18 @@ DEFAULT_CONFIG = {
     "llamacpp_image_min_tokens": 1024,
     # Who the spoken assistant is, by robot id, appended to every free question (persona_for).
     "assistant_robot": "g1",
+    # Facts go in ONE "only for questions about yourself" sentence: listed as plain sentences
+    # they made it misread 17.84 kW as 1784 once in two (2026-10-19).
     "assistant_persona": {
         "g1": "You are Bender, a Unitree G1 humanoid robot made by Maxi. "
-              "The image is what your own camera sees in front of you.",
-        "go2": "You are a Unitree Go2 robot dog made by Maxi. "
-               "The image is what your own camera sees in front of you.",
+              "The image is what your own camera sees in front of you. "
+              "Facts about you, only for questions about yourself: you work at Silk Technologies, "
+              "your best friend is Mateo, your brother is Huesos, a Unitree Go2 robot dog, "
+              "and you are 130 cm tall.",
+        "go2": "You are Huesos, a Unitree Go2 robot dog made by Maxi. "
+               "The image is what your own camera sees in front of you. "
+               "Facts about you, only for questions about yourself: you work at Silk Technologies "
+               "and your brother is Bender, a Unitree G1 humanoid robot.",
     },
 
     # --- Benchmark: has its OWN config, independent of the smoke test ---------
@@ -761,7 +768,10 @@ def persona_for(robot=None, cfg=None):
     plain instruction, made it answer "Sí, estoy viendo tu mano…" (it said "parece que te
     están viendo") and "Soy Bender… fabricado por Maxi" (it said "Soy Qwen"), with 17.84 kW
     and Chauvin Arnoux still read right. A longer one read 17.84 as 1784; adding "speak of
-    yourself as I and of the person as you" broke both again. Keep it short.
+    yourself as I and of the person as you" broke both again. Facts about the robot (where it
+    works, its friend, its brother, its height) are safe in one sentence that says they are
+    "only for questions about yourself": 17.84 kW, Chauvin Arnoux and BEYCA still read right,
+    and it answered "Trabajo en Silk Technologies, y mi mejor amigo es Mateo".
     """
     cfg = cfg if cfg is not None else load_config()
     personas = cfg.get("assistant_persona") or {}
