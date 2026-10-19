@@ -188,6 +188,29 @@ def kokoro_voices():
     return list(KOKORO_VOICE_NAMES) if kokoro_available() else []
 
 
+# Kokoro speaks ~7.5 dB quieter than Piper (RMS -22 dBFS against -15, peaks -3 to -6 dBFS
+# against 0; measured 2026-10-19): on the robot at 80/100, "Santa" sounded clearly lower than
+# Daniela at the same setting. Piper normalises its output; Kokoro does not. So Kokoro is
+# brought to Piper's level, with a soft limiter above KNEE so the peaks the gain pushes past
+# full scale are rounded off instead of clipped.
+TARGET_RMS = 0.18
+KNEE = 0.8
+
+
+def _level_like_piper(samples):
+    """Float samples in [-1, 1], gained to TARGET_RMS RMS and soft-limited under 1.0."""
+    import numpy as np
+
+    x = np.asarray(samples, dtype=np.float32).reshape(-1)
+    rms = float(np.sqrt(np.mean(x * x))) if x.size else 0.0
+    if rms < 1e-4:
+        return x                                   # silence: nothing to level
+    y = x * (TARGET_RMS / rms)
+    over = np.abs(y) > KNEE
+    y[over] = np.sign(y[over]) * (KNEE + (1 - KNEE) * np.tanh((np.abs(y[over]) - KNEE) / (1 - KNEE)))
+    return y
+
+
 def _synthesize_kokoro(text, voice):
     """Synthesize with Kokoro. Returns (pcm_bytes, sample_rate). Kokoro yields
     float32 samples in [-1, 1] at 24 kHz; convert to 16-bit little-endian PCM."""
@@ -196,6 +219,7 @@ def _synthesize_kokoro(text, voice):
     k = _load_kokoro()
     name = voice if voice in KOKORO_VOICE_NAMES else KOKORO_VOICE_NAMES[0]
     samples, sample_rate = k.create(text, voice=name, speed=1.0, lang=KOKORO_LANG)
+    samples = _level_like_piper(samples)
     pcm = (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
     return pcm, int(sample_rate)
 
