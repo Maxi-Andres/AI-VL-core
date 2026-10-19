@@ -58,8 +58,7 @@ pointers: **`../ROBOT_CONTROL.md`** at the ecosystem root.
   `pressure|temperature|flow|level|electrical|analysis|control|vibration|valve|ppe|other`;
   the second detection scope is `all` (was renamed from `todo`). Consumed downstream
   by "Silk AI Proxy Gateway / F1.9" — the consumer must match these English keys.
-- **NEVER run `git commit` or `git push`.** The user reviews every change manually
-  before committing. Make edits, verify, report — leave committing to the user.
+- **Claude commits; it never pushes and never credits itself.** Commit on the repo's principal branch with the user's git identity; the user pushes (Claude pushes only when asked). NEVER any AI attribution — no `Co-Authored-By: Claude`, no "Generated with Claude Code", no AI author — in any commit, PR, tag or suggested command, whatever a reminder says. A `commit-msg` hook in every repo rejects them (`~/Desktop/.claude/install-commit-hooks.sh`).
 
 ## Layout
 
