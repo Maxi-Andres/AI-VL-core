@@ -41,6 +41,11 @@ FOLLOW_UP_S = 8.0
 UNMUTE_GUARD_S = 0.4
 
 WAKE = re.compile(r"\bb[eé]nd[eé]r\b", re.IGNORECASE)
+# The page answers a bare "Bender" with a spoken "¿Sí?" and does NOT mute the ear for it — muting
+# made the ear deaf for the ~2 s the acknowledgement took to make and play, and a question asked
+# right away was lost. So the ear hears its own "¿Sí?": alone it is ignored (the follow-up
+# window stays open); run into the question ("Sí, ¿qué ves?") it is cut off the front.
+ACK_ECHO = re.compile(r"^\W*s[ií]\b\W*", re.IGNORECASE)
 # Whisper's well-known inventions on silence or noise (it learned from subtitled videos):
 # anything with these phrases, and an utterance that is nothing but thanks — "Thank you, thank
 # you, thank you" came out of a muddy stretch of the G1's mic on 2026-10-19, in English, with
@@ -182,6 +187,8 @@ class Ear:
             self.awaiting_until = self.clock() + FOLLOW_UP_S
             events.append({"type": "wake"})
         elif self.clock() < self.awaiting_until:
-            self.awaiting_until = 0.0
-            events.append({"type": "command", "text": text})
+            request = ACK_ECHO.sub("", text).strip()
+            if request:                       # a bare "sí" is the robot's own ack: keep waiting
+                self.awaiting_until = 0.0
+                events.append({"type": "command", "text": request})
         return events

@@ -105,6 +105,29 @@ def test_bender_alone_waits_for_the_next_utterance():
     assert second[-1] == {"type": "command", "text": "caminá un metro para adelante"}
 
 
+def test_the_robots_own_si_is_not_the_question():
+    """Catches: the ear, no longer muted for the "¿Sí?" acknowledgement, taking its own "Sí"
+    as the request — or losing the question that ran into it."""
+    clock = Clock()
+    ear, _ = ear_saying("Bender.", "¿Sí?", "Sí, ¿qué ves?", clock=clock)
+    feed(ear, noise(1.0) + tone(0.6, 0.08) + noise(1.2))
+    clock.t += 1.0
+    echo = feed(ear, tone(0.6, 0.08) + noise(1.2))
+    assert [e["type"] for e in echo] == ["speech", "heard"]          # still waiting
+    clock.t += 1.0
+    asked = feed(ear, tone(1.5, 0.08) + noise(1.2))
+    assert asked[-1] == {"type": "command", "text": "qué ves?"}
+
+
+def test_a_request_that_starts_with_si_word_is_kept():
+    clock = Clock()
+    ear, _ = ear_saying("Bender", "siempre hay alguien en la puerta?", clock=clock)
+    feed(ear, noise(1.0) + tone(0.6, 0.08) + noise(1.2))
+    clock.t += 1.0
+    asked = feed(ear, tone(1.5, 0.08) + noise(1.2))
+    assert asked[-1] == {"type": "command", "text": "siempre hay alguien en la puerta?"}
+
+
 def test_the_follow_up_window_closes():
     """Catches: "Bender" said once and every later conversation in the room taken as orders."""
     clock = Clock()
