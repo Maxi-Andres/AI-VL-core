@@ -201,6 +201,44 @@ def health():
     return {"status": "ok", "service": "iacore"}
 
 
+def _vlm_online():
+    """Does the VLM server answer? llama-server has /health; Ollama answers /api/tags."""
+    import requests
+    try:
+        if vlm_common.vlm_backend() == "llamacpp":
+            return requests.get(f"{vlm_common.host_of(LLAMACPP_URL)}/health", timeout=1).ok
+        return requests.get(f"{vlm_common.host_of(OLLAMA_URL)}/api/tags", timeout=1).ok
+    except Exception:
+        return False
+
+
+def _gpu_memory():
+    """The whole card's memory (every process, not just this one), from nvidia-smi: what the
+    header shows as "GPU memory". None without an NVIDIA GPU or driver.
+
+    It matters beyond this service: on 2026-10-27 a full 8 GB card froze the whole browser on
+    entering fullscreen (kernel: NVRM NV_ERR_NO_MEMORY), with the VLM, detection and the desktop
+    sharing it — and nothing on screen said the card was full."""
+    import subprocess
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used,memory.total,name", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2, check=True).stdout
+        used, total, name = (v.strip() for v in out.splitlines()[0].split(",", 2))
+        return {"used_mb": int(used), "total_mb": int(total), "name": name}
+    except Exception:
+        return None
+
+
+@app.get("/status")
+def status():
+    """What the header's services list needs beyond "iacore answers": whether the VLM server
+    answers, and how full the GPU is. Slower than /health (two probes, ~0.1 s) — the gateway
+    asks it on its cached presence round, never per request."""
+    return {"vlm": {"online": _vlm_online(), "backend": vlm_common.vlm_backend()},
+            "gpu": _gpu_memory()}
+
+
 @app.get("/options")
 def options():
     """Everything the UI needs to populate its controls (proxied by the backend)."""
