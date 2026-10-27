@@ -212,31 +212,98 @@ def _vlm_online():
         return False
 
 
-def _gpu_memory():
-    """The whole card's memory (every process, not just this one), from nvidia-smi: what the
-    header shows as "GPU memory". None without an NVIDIA GPU or driver.
+# Where the kernel lists graphics cards; tests point this at a fake tree.
+DRM_ROOT = "/sys/class/drm"
+_VENDORS = {"0x10de": "nvidia", "0x1002": "amd", "0x8086": "intel"}
+
+
+def _nvidia_gpus():
+    """Every NVIDIA card, from nvidia-smi (desktop and data-centre cards alike)."""
+    import subprocess
+    out = subprocess.run(
+        ["nvidia-smi", "--query-gpu=memory.used,memory.total,name", "--format=csv,noheader,nounits"],
+        capture_output=True, text=True, timeout=1.5, check=True).stdout
+    gpus = []
+    for line in out.splitlines():
+        if line.strip():
+            used, total, name = (v.strip() for v in line.split(",", 2))
+            gpus.append({"vendor": "nvidia", "name": name, "used_mb": int(used), "total_mb": int(total)})
+    return gpus
+
+
+def _pci_name(slot, vendor):
+    """'AMD Radeon RX 7900 XT' from lspci for a PCI slot (the marketing name in brackets when
+    lspci has one), or None without lspci or for an id it does not know."""
+    import shlex
+    import subprocess
+    try:
+        out = subprocess.run(["lspci", "-mm", "-s", slot], capture_output=True, text=True,
+                             timeout=1, check=True).stdout
+        device = shlex.split(out)[3]        # slot, class, vendor, DEVICE, -r.., -p.., subsystem…
+    except Exception:
+        return None
+    if "[" in device and device.endswith("]"):
+        device = device[device.rindex("[") + 1:-1]
+    return f"{'AMD' if vendor == 'amd' else 'Intel'} {device}"
+
+
+def _sysfs_gpus():
+    """AMD and Intel cards from the kernel's DRM list. amdgpu reports its memory there; Intel's
+    drivers do not, so an Intel card comes back with no figures."""
+    import re
+    from pathlib import Path
+    gpus = []
+    for card in sorted(Path(DRM_ROOT).glob("card*")):
+        if not re.fullmatch(r"card\d+", card.name):
+            continue                                    # card1-DP-1 and the like are outputs
+        dev = card / "device"
+        try:
+            vendor = _VENDORS.get((dev / "vendor").read_text().strip())
+        except OSError:
+            continue
+        if vendor not in ("amd", "intel"):
+            continue
+        gpu = {"vendor": vendor, "name": _pci_name(dev.resolve().name, vendor) or vendor.upper(),
+               "used_mb": None, "total_mb": None}
+        try:
+            gpu["total_mb"] = int((dev / "mem_info_vram_total").read_text()) // 2**20
+            gpu["used_mb"] = int((dev / "mem_info_vram_used").read_text()) // 2**20
+        except (OSError, ValueError):
+            pass
+        gpus.append(gpu)
+    return gpus
+
+
+def _gpus():
+    """The graphics cards the AI can use, with their memory where the driver tells it: what the
+    header shows. An empty list means none was found — detection and the VLM then run on the
+    processor. NVIDIA cards when there are any (CUDA, what this stack runs on): a machine with
+    one also often has the processor's own graphics (this one has an AMD Raphael), which runs
+    nothing here and whose small memory would read as "full". Without NVIDIA, the AMD and Intel
+    cards from the kernel's list.
 
     It matters beyond this service: on 2026-10-27 a full 8 GB card froze the whole browser on
     entering fullscreen (kernel: NVRM NV_ERR_NO_MEMORY), with the VLM, detection and the desktop
     sharing it — and nothing on screen said the card was full."""
-    import subprocess
     try:
-        out = subprocess.run(
-            ["nvidia-smi", "--query-gpu=memory.used,memory.total,name", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, timeout=2, check=True).stdout
-        used, total, name = (v.strip() for v in out.splitlines()[0].split(",", 2))
-        return {"used_mb": int(used), "total_mb": int(total), "name": name}
+        nvidia = _nvidia_gpus()
     except Exception:
-        return None
+        nvidia = []
+    if nvidia:
+        return nvidia
+    try:
+        return _sysfs_gpus()
+    except Exception:
+        return []
 
 
 @app.get("/status")
 def status():
     """What the header's services list needs beyond "iacore answers": whether the VLM server
-    answers, and how full the GPU is. Slower than /health (two probes, ~0.1 s) — the gateway
+    answers, and which graphics cards there are and how full. Slower than /health (two probes, ~0.1 s) — the gateway
     asks it on its cached presence round, never per request."""
     return {"vlm": {"online": _vlm_online(), "backend": vlm_common.vlm_backend()},
-            "gpu": _gpu_memory()}
+            "gpus": _gpus()}
 
 
 @app.get("/options")
