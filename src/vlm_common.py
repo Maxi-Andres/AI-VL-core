@@ -675,6 +675,8 @@ def _openai_payload(payload):
         "model": payload.get("model", ""),   # informational: llama-server serves one model
         "messages": messages,
         "stream": True,
+        # The last chunk then says how many tokens the question took: the conversation meter.
+        "stream_options": {"include_usage": True},
         "temperature": opts.get("temperature", 0.1),
         "max_tokens": opts.get("num_predict", 512),
         "cache_prompt": True,
@@ -726,6 +728,32 @@ def _stream_chat_llamacpp(payload, url, timeout):
         in_tok = usage.get("prompt_tokens", timings.get("prompt_n", in_tok))
         out_tok = usage.get("completion_tokens", timings.get("predicted_n", out_tok))
     return "".join(content), "".join(reasoning), done_reason, in_tok, out_tok
+
+
+_WINDOW = {}
+
+
+def llamacpp_window(url=LLAMACPP_HOST):
+    """The llama-server's context window in tokens (its -c), or None when it does not say.
+    Asked once per server: it is fixed when the server starts."""
+    base = host_of(url)
+    if base not in _WINDOW:
+        try:
+            r = requests.get(base + "/props", timeout=3)
+            r.raise_for_status()
+            _WINDOW[base] = int(r.json()["default_generation_settings"]["n_ctx"])
+        except (requests.RequestException, ValueError, KeyError, TypeError):
+            return None
+    return _WINDOW[base]
+
+
+# The last chunk of a streamed answer: how much of the window it took (service /vlm/stream).
+# Record separators, like search_common.SEARCHING_MARK; the page reads and drops it.
+USAGE_MARK = "\x1eusage "
+
+
+def usage_mark(usage):
+    return f"{USAGE_MARK}{json.dumps(usage, separators=(',', ':'))}\x1e"
 
 
 def list_llamacpp_models(url=LLAMACPP_HOST):
@@ -858,9 +886,14 @@ def persona_for(robot=None, cfg=None, question=None):
     return f"{identity} About yourself, since it was asked: {'; '.join(facts)}."
 
 
-def free_prompt_system(robot=None, question=None):
+def free_prompt_system(robot=None, question=None, search=None):
     persona = persona_for(robot, question=question)
-    return f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
+    system = f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
+    # Web results, only when the question needs the web (search_common decides, or the caller
+    # already did: `search`).
+    from search_common import search_fact
+    found = search_fact(question, decided=search)
+    return f"{system} {found}" if found else system
 
 
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
@@ -942,8 +975,37 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     }
 
 
+# The conversation so far, as text, rides on each question (2026-10-28). Only text: an old
+# frame costs ~1000-1300 tokens, a question with its answer ~100-300, and the server's window
+# is 4096 (vlm-server.sh VLM_CTX) for the frame, the system message, the turns and the answer.
+# The newest turns that fit this many characters go (~3.5 characters a token in Spanish:
+# ~1400 tokens); older ones drop off. More, and bigger windows, wait for a bigger card
+# (.claude/roadmap/PLATAFORMA.md, "El asistente como un LLM de verdad").
+HISTORY_CHARS = 5000
+
+
+def history_messages(history, budget=HISTORY_CHARS):
+    """[{"question", "answer"}] oldest first -> chat messages for the newest turns that fit
+    `budget` characters, in order. Turns without an answer are skipped."""
+    turns = []
+    used = 0
+    for turn in reversed(history or []):
+        q = str((turn or {}).get("question") or "").strip()
+        a = str((turn or {}).get("answer") or "").strip()
+        if not q or not a:
+            continue
+        if used + len(q) + len(a) > budget:
+            break
+        used += len(q) + len(a)
+        turns.append((q, a))
+    messages = []
+    for q, a in reversed(turns):
+        messages += [{"role": "user", "content": q}, {"role": "assistant", "content": a}]
+    return messages
+
+
 def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
-                     url=OLLAMA_HOST, robot=None):
+                     url=OLLAMA_HOST, robot=None, history=None, search=None, usage=None):
     """Stream a FREE-PROMPT answer token by token (a generator of text pieces).
 
     This is the streaming sibling of query_vlm for the "ask anything" case only:
@@ -955,14 +1017,37 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
 
     For the fastest time-to-first-word use an instruct model (no thinking), so the
     answer starts immediately instead of after a reasoning block.
+
+    `history` is the conversation so far ([{"question", "answer"}], oldest first): its newest
+    turns go before the question, as text (history_messages), so "¿y la de la izquierda?"
+    knows what it follows. The image is only the current frame.
+
+    `search`: whether this question needs the web, when the caller decided it already (None:
+    decided here, by keyword). A searched question that does not point at what is in view goes
+    WITHOUT the frame: with it, the model kept answering "la imagen es de una habitación, no
+    tiene información sobre partidos" before the results (2026-10-28).
+
+    `usage`, a dict, is filled when the answer ends: prompt_tokens, completion_tokens, window
+    (the server's context, llama-server only), turns_sent of turns_total — what the page shows
+    so the person can tell when to start a new conversation.
     """
-    system_msg = free_prompt_system(robot, question=prompt)
+    from search_common import about_the_image, wants_search
+    if search is None:
+        search = wants_search(prompt)
+    system_msg = free_prompt_system(robot, question=prompt, search=search)
+    question = {"role": "user", "content": prompt}
+    if not search or about_the_image(prompt):
+        question["images"] = [img_b64]
+    earlier = history_messages(history, budget=max(1500, HISTORY_CHARS - max(0, len(system_msg) - 1000)))
     supports_think = model_supports_thinking(model, url)
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_msg},
-            {"role": "user", "content": prompt, "images": [img_b64]},
+            # Web results make the system message long; the conversation gives way to them,
+            # or the frame, the results, the turns and the answer would not fit the window.
+            *earlier,
+            question,
         ],
         "stream": True,
         "options": {
@@ -973,8 +1058,17 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     }
     if supports_think:
         payload["think"] = False  # ask for no reasoning; content should come first
+    if usage is not None:
+        usage["turns_sent"] = len(earlier) // 2
+        usage["turns_total"] = sum(1 for t in history or []
+                                   if str((t or {}).get("question") or "").strip()
+                                   and str((t or {}).get("answer") or "").strip())
     if vlm_backend() == "llamacpp":
         for chunk in _openai_chunks(payload, url, 600):
+            if usage is not None and chunk.get("usage"):
+                usage["prompt_tokens"] = chunk["usage"].get("prompt_tokens")
+                usage["completion_tokens"] = chunk["usage"].get("completion_tokens")
+                usage["window"] = llamacpp_window(url)
             piece = ((chunk.get("choices") or [{}])[0].get("delta") or {}).get("content")
             if piece:
                 yield piece

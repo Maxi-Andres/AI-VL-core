@@ -56,11 +56,12 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from PIL import Image
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import asr_common
 import command_common
 import ear_common
+import search_common
 import tts_common
 import vlm_common
 import yolo_common
@@ -153,6 +154,11 @@ class VlmRequest(BaseModel):
     robot: str | None = None        # whose identity answers (persona_for)
 
 
+class HistoryTurn(BaseModel):
+    question: str = Field("", max_length=4000)
+    answer: str = Field("", max_length=8000)
+
+
 class VlmStreamRequest(BaseModel):
     image: str = ""
     prompt: str = ""
@@ -160,6 +166,9 @@ class VlmStreamRequest(BaseModel):
     max_tokens: int = CFG.get("max_tokens", 8192)
     num_ctx: int = CFG.get("num_ctx", 16384)
     robot: str | None = None        # whose identity answers (persona_for)
+    # The conversation so far, oldest first; the newest turns that fit go along as text
+    # (vlm_common.history_messages).
+    history: list[HistoryTurn] = Field(default_factory=list, max_length=50)
 
 
 class SpeakRequest(BaseModel):
@@ -481,13 +490,28 @@ async def vlm_stream(req: VlmStreamRequest):
 
     def gen():
         try:
+            # Whether it needs the web, decided once: by the llama-server itself (~27 ms, text
+            # only) when that is the backend, else by keyword (search_common.wants_search).
+            usage = {}
+            classifier = vlm_url() if vlm_common.vlm_backend() == "llamacpp" else None
+            search = search_common.wants_search(prompt, classifier_url=classifier)
+            # Said before the search starts (it takes 1-4 s), so the page can show "Buscando en
+            # internet…" instead of a silent wait. The page strips the mark (api/backend.ts).
+            if search:
+                yield search_common.SEARCHING_MARK
             yield from vlm_common.query_vlm_stream(
                 b64, model, prompt,
                 max_tokens=req.max_tokens,
                 num_ctx=req.num_ctx,
                 url=vlm_url(),
                 robot=req.robot,
+                history=[t.model_dump() for t in req.history],
+                search=search,
+                usage=usage,
             )
+            # Last: how much of the window this question took (the page's conversation meter).
+            if usage.get("prompt_tokens") is not None:
+                yield vlm_common.usage_mark(usage)
         except Exception as e:
             # Surface the error inline so the client sees why the stream stopped.
             yield f"\n[error] {e}"
