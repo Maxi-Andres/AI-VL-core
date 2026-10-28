@@ -219,6 +219,11 @@ class Ear:
         return [{"type": "heard", "text": text}, {"type": "barge", "text": command}]
 
     def hear(self, pcm):
+        # When the person STARTED talking: the follow-up window is for starting the question,
+        # not for finishing it. Checked at the end, a long question after "¿Sí?" (the ack, the
+        # pause, ~4 s of speech, the closing silence, the transcription) fell outside the 8 s
+        # and was heard but not answered (2026-10-28).
+        began = self.clock() - len(pcm) / (2 * RATE)
         text = (self.transcribe(pcm_to_wav(pcm)) or "").strip()
         if not text or HALLUCINATIONS.search(text):
             return []
@@ -230,7 +235,7 @@ class Ear:
         elif woke:
             self.awaiting_until = self.clock() + FOLLOW_UP_S
             events.append({"type": "wake"})
-        elif self.clock() < self.awaiting_until:
+        elif began < self.awaiting_until:
             request = ACK_ECHO.sub("", text).strip()
             if request:                       # a bare "sí" is the robot's own ack: keep waiting
                 self.awaiting_until = 0.0

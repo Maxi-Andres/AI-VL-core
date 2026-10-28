@@ -39,6 +39,15 @@ def feed(ear, pcm):
     return events
 
 
+def feed_timed(ear, pcm, clock):
+    """feed(), with the clock running as the audio would: 160 ms a packet."""
+    events = []
+    for i in range(0, len(pcm), PACKET * 2):
+        clock.t += PACKET / ec.RATE
+        events += ear.feed(pcm[i:i + PACKET * 2])
+    return events
+
+
 class Clock:
     def __init__(self):
         self.t = 100.0
@@ -134,8 +143,19 @@ def test_the_follow_up_window_closes():
     ear, _ = ear_saying("Bender", "y después fuimos a comer", clock=clock)
     feed(ear, noise(1.0) + tone(0.6, 0.08) + noise(1.2))
     clock.t += ec.FOLLOW_UP_S + 1
-    events = feed(ear, tone(1.5, 0.08) + noise(1.2))
+    events = feed_timed(ear, tone(1.5, 0.08) + noise(1.2), clock)
     assert [e["type"] for e in events] == ["speech", "heard"]
+
+
+def test_a_long_question_started_in_time_is_answered():
+    """Catches: "¿Qué elemento de la tabla periódica…?" after "¿Sí?" heard but not answered — it
+    ENDED after the window, though it started well inside it (2026-10-28)."""
+    clock = Clock()
+    ear, _ = ear_saying("Bender", "qué elemento de la tabla periódica tiene 73 protones", clock=clock)
+    feed(ear, noise(1.0) + tone(0.6, 0.08) + noise(1.2))
+    clock.t += ec.FOLLOW_UP_S - 1.0               # starts talking 1 s before the window closes
+    events = feed_timed(ear, tone(5.0, 0.08) + noise(1.2), clock)   # 6 s: ends 5 s late
+    assert events[-1] == {"type": "command", "text": "qué elemento de la tabla periódica tiene 73 protones"}
 
 
 def test_talk_without_the_name_is_heard_but_not_obeyed():
