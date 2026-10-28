@@ -196,7 +196,7 @@ def test_a_web_question_goes_without_the_frame(monkeypatch):
     monkeypatch.setattr(vc, "vlm_backend", lambda: "llamacpp")
     monkeypatch.setattr(vc, "model_supports_thinking", lambda *a, **k: False)
     monkeypatch.setattr(vc, "_openai_chunks", lambda payload, url, t: sent.append(payload) or iter(()))
-    monkeypatch.setattr(sc, "search_fact", lambda q, url=None, decided=None: "results" if decided else "")
+    monkeypatch.setattr(sc, "search_fact", lambda q, url=None, decided=None, earlier=(): "results" if decided else "")
     list(vc.query_vlm_stream("aGk=", "m", "quién ganó en Brasil", search=True))
     list(vc.query_vlm_stream("aGk=", "m", "buscá en internet qué es esto", search=True))
     list(vc.query_vlm_stream("aGk=", "m", "¿qué ves?", search=False))
@@ -226,3 +226,56 @@ def test_the_engines_pick_the_language_from_the_query(asked, monkeypatch):
     monkeypatch.setattr(sc.requests, "get", lambda url, params=None, timeout=None: seen.update(params) or _Answer(DOLLAR))
     sc.search("who won the race")
     assert seen["language"] == "auto"
+
+
+@pytest.mark.parametrize("question", [
+    "que partidos de fútbol hay hoy, buscá eso", "buscá eso", "buscalo en internet",
+    "what matches are on today, search that", "look it up", "search it on the web",
+])
+def test_the_that_after_search_is_the_question_not_the_picture(question):
+    """Catches: "¿qué partidos hay hoy?, buscá eso" not searched — "eso" was taken for something
+    in view (2026-10-28)."""
+    assert sc.wants_search(question)
+    assert not sc.about_the_image(question)
+
+
+@pytest.mark.parametrize("question", ["buscá qué marca es esto", "search what brand this is"])
+def test_a_that_inside_the_question_is_still_the_picture(question):
+    assert not sc.wants_search(question)
+
+
+@pytest.mark.parametrize("follow_up, earlier, query", [
+    ("pero buscalo en internet vos", ["¿de qué color es?", "¿qué partidos de fútbol hay hoy?"],
+     "que partidos de futbol hay hoy"),
+    ("look it up then", ["what matches are on today?"], "what matches are on today"),
+    ("buscá eso", [], "busca eso"),
+    ("y buscá el clima en Rosario", ["¿qué partidos hay hoy?"], "y el clima en rosario"),
+])
+def test_a_follow_up_without_a_topic_searches_the_previous_question(follow_up, earlier, query):
+    """Catches: "pero buscalo en internet vos" searched as "pero vos", and the model, with junk
+    results, said it could not search (2026-10-28)."""
+    assert sc.search_query(follow_up, earlier) == query
+
+
+def test_the_stream_searches_the_previous_question(monkeypatch):
+    """The conversation's questions reach the search, not only the model."""
+    seen = {}
+    monkeypatch.setattr(vc, "vlm_backend", lambda: "llamacpp")
+    monkeypatch.setattr(vc, "model_supports_thinking", lambda *a, **k: False)
+    monkeypatch.setattr(vc, "_openai_chunks", lambda payload, url, t: iter(()))
+    monkeypatch.setattr(sc, "search", lambda q, url=None, figure=False: seen.setdefault("q", q) and [])
+    list(vc.query_vlm_stream("aGk=", "m", "pero buscalo en internet vos", search=True,
+                             history=[{"question": "¿Qué partidos hay hoy?", "answer": "No sé."}]))
+    assert seen["q"] == "que partidos hay hoy"
+
+
+def test_after_a_search_the_model_is_told_it_did_search(asked):
+    """Catches: "no puedo realizar búsquedas en Internet" over the results, copied from its own
+    earlier answer in the history."""
+    assert "never say you cannot search" in sc.search_fact("¿Cuánto está el dólar hoy?")
+
+
+def test_without_a_search_the_model_offers_one():
+    assert "ask you to search the internet" in vc.free_prompt_system(question="¿Quién ganó?", search=False)
+    assert "search" not in vc.free_prompt_system(question="¿Qué dice el cartel?", search=False), \
+        "reading prompts stay as measured"

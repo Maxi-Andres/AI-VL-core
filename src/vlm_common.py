@@ -886,14 +886,24 @@ def persona_for(robot=None, cfg=None, question=None):
     return f"{identity} About yourself, since it was asked: {'; '.join(facts)}."
 
 
-def free_prompt_system(robot=None, question=None, search=None):
+# When no search was made: the model answered "No tengo acceso a internet, consultá ESPN…", and
+# the person did not know it could search when asked (2026-10-28).
+NOT_SEARCHED = ("If the question needs current information you do not have (news, results, "
+                "prices, weather), say so briefly and that they can ask you to search the "
+                "internet for it.")
+
+
+def free_prompt_system(robot=None, question=None, search=None, earlier=()):
     persona = persona_for(robot, question=question)
     system = f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
     # Web results, only when the question needs the web (search_common decides, or the caller
-    # already did: `search`).
-    from search_common import search_fact
-    found = search_fact(question, decided=search)
-    return f"{system} {found}" if found else system
+    # already did: `search`). `earlier`: the previous questions, for a "buscalo" follow-up.
+    # Not on a question about the picture: reading prompts stay as they were measured.
+    from search_common import about_the_image, search_fact
+    found = search_fact(question, decided=search, earlier=earlier)
+    if found:
+        return f"{system} {found}"
+    return f"{system} {NOT_SEARCHED}" if question and not about_the_image(question) else system
 
 
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
@@ -1034,7 +1044,8 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     from search_common import about_the_image, wants_search
     if search is None:
         search = wants_search(prompt)
-    system_msg = free_prompt_system(robot, question=prompt, search=search)
+    asked_before = [t.get("question") or "" for t in history or []]
+    system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before)
     question = {"role": "user", "content": prompt}
     if not search or about_the_image(prompt):
         question["images"] = [img_b64]

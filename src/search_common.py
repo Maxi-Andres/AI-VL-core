@@ -50,8 +50,10 @@ TIMEOUT_S = 6.0
 #    es esto"); a bare "buscá" does not ("buscá el matafuego en la imagen").
 NAMES_THE_WEB = ["internet", "en la web", "en google", "googlea", "en linea", "online",
                  "on the web", "web search", "google it"]
-ASKS_TO_SEARCH = ["busc", "averigu", "search", "look up", "find out"]
+ASKS_TO_SEARCH = ["busc", "averigu", "search", "look up", "look it up", "find out"]
 # 2. About what is in view — whole words only ("esa" is not "esas", "eso" is not "esos").
+#    Except right after a search verb: there "eso" is what was just asked ("¿qué partidos hay
+#    hoy?, buscá eso" was read as "that thing in the picture" and not searched, 2026-10-28).
 ABOUT_THE_IMAGE = ["imagen", "foto", "camara", "pantalla", "cartel", "letrero", "frente", "ves",
                    "veo", "esto", "eso", "esa", "ese", "aca", "ahi", "image", "picture", "photo",
                    "camera", "screen", "sign", "this", "see"]
@@ -113,6 +115,18 @@ _ASKING = re.compile(
     re.IGNORECASE)
 
 
+# A search verb (with where to search) and the "that" after it: the question it points at.
+_POINTER = re.compile(
+    r"\b(busca(me|r|lo|la)?|averigua(me|r)?|googlea(me)?|search( for)?|look up|find out|google)"
+    r"((?: en internet| en la web| en google| on the web| on the internet| online)?)"
+    r"\s+(eso|esto|that|this|it)\b")
+# Words that carry no topic: a follow-up made only of these ("pero buscalo en internet vos")
+# searches the previous question instead.
+_FILLER = {"pero", "vos", "tu", "usted", "eso", "esto", "entonces", "dale", "ahora", "otra",
+           "vez", "nuevo", "tambien", "but", "you", "that", "this", "then", "now", "again",
+           "okay", "please", "also"}
+
+
 def _plain(text):
     return "".join(c for c in unicodedata.normalize("NFD", (text or "").lower())
                    if unicodedata.category(c) != "Mn")
@@ -126,9 +140,14 @@ def _has_word(text, words):
     return any(re.search(r"\b" + re.escape(w) + r"\b", text) for w in words)
 
 
+def _unpointed(plain):
+    """`plain` without the "that" of "buscá eso" / "look it up" (it points at the question)."""
+    return _POINTER.sub(r"\1\6", plain)
+
+
 def about_the_image(question):
     """The question points at what is in view ("el cartel", "esto", "what do you see")."""
-    return _has_word(_plain(question), ABOUT_THE_IMAGE)
+    return _has_word(_unpointed(_plain(question)), ABOUT_THE_IMAGE)
 
 
 def model_says_web(question, url, timeout=CLASSIFIER_TIMEOUT_S):
@@ -154,7 +173,7 @@ def wants_search(question, classifier_url=None):
         return False
     if _has(q, NAMES_THE_WEB):
         return True
-    image = _has_word(q, ABOUT_THE_IMAGE)
+    image = about_the_image(question)
     if _has(q, ASKS_TO_SEARCH):
         return not image
     if image:
@@ -166,12 +185,28 @@ def wants_search(question, classifier_url=None):
     return _has(q, TOPICS)
 
 
-def search_query(question):
-    """The question without the asking ("Bender, buscá en internet el clima de hoy" -> "el clima
-    de hoy"): the engines rank the topic, and the polite words only dilute it."""
-    q = _ASKING.sub(" ", _plain(question))
+def _topic(question):
+    """The question without the asking and the "that" after it."""
+    q = _ASKING.sub(" ", _unpointed(_plain(question)))
     q = re.sub(r"[¿?¡!]", " ", q)
-    q = re.sub(r"\s+", " ", q).strip(" ,.")
+    return re.sub(r"\s+", " ", q).strip(" ,.")
+
+
+def _has_topic(query):
+    return any(w not in _STOP and w not in _FILLER for w in re.findall(r"[a-z0-9]{3,}", query))
+
+
+def search_query(question, earlier=()):
+    """The question without the asking ("Bender, buscá en internet el clima de hoy" -> "el clima
+    de hoy"): the engines rank the topic, and the polite words only dilute it.
+    `earlier`: the conversation's previous questions, oldest first. When this one has no topic
+    of its own ("buscalo en internet vos", "look it up"), the newest one that does is searched
+    — 2026-10-28 it searched "pero vos", and the model said it could not search."""
+    q = _topic(question)
+    if not _has_topic(q):
+        for before in reversed(list(earlier)):
+            if _has_topic(_topic(before)):
+                return _topic(before)
     return q or _plain(question)
 
 
@@ -269,14 +304,15 @@ def search(query, url=SEARXNG_URL, timeout=TIMEOUT_S, figure=False):
     return out[:MAX_RESULTS]
 
 
-def search_fact(question, url=SEARXNG_URL, decided=None):
+def search_fact(question, url=SEARXNG_URL, decided=None, earlier=()):
     """What goes to the model for this question: "" when it asks for no search; the results
     with their sources when it does; a plain "the search failed" when it could not be done, so
     the model says so instead of inventing an answer. `decided`: wants_search's answer when the
-    caller already has it (the service asks once, to say "searching" first)."""
+    caller already has it (the service asks once, to say "searching" first). `earlier`: the
+    previous questions, for a follow-up like "buscalo" (search_query)."""
     if not (wants_search(question) if decided is None else decided):
         return ""
-    query = search_query(question)
+    query = search_query(question, earlier)
     t0 = time.monotonic()
     try:
         asked = _plain(question)
@@ -302,8 +338,11 @@ def search_fact(question, url=SEARXNG_URL, decided=None):
     # (2026-10-28, "cuándo viene el Papa"). And the question is about the web, not the picture:
     # it kept saying "no hay información en esta imagen".
     today = datetime.date.today().isoformat()
+    # "You searched": with the earlier "I have no internet access" in the history, the model
+    # repeated it over the results (2026-10-28).
     return (f"Today is {today}. This question is about the web, not about the image: do not "
-            "mention the image. Results of a web search made just now: " + " ".join(lines) +
+            "mention the image. You searched the internet for it just now, so never say you "
+            "cannot search or browse. Results of that search: " + " ".join(lines) +
             " Answer in two or three sentences with the fact or figure asked and the name of "
             "the site it comes from (the site, never a number like [4]); if the results do not "
             "answer it, say so.")
