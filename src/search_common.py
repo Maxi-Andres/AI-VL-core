@@ -60,14 +60,19 @@ NAMES_THE_WEB = ["internet", "en la web", "en google", "googlea", "en linea", "o
                  "on the web", "web search", "google it"]
 ASKS_TO_SEARCH = ["busc", "averigu", "search", "look up", "look it up", "find out"]
 # 2. Names the picture — whole words only. Never searched.
-NAMES_THE_IMAGE = ["imagen", "foto", "camara", "pantalla", "cartel", "letrero", "frente", "ves",
-                   "veo", "image", "picture", "photo", "camera", "screen", "sign", "see"]
+NAMES_THE_IMAGE = ["imagen", "foto", "camara", "pantalla", "cartel", "letrero", "frente", "image",
+                   "picture", "photo", "camera", "screen", "sign"]
 # Points at something in view: the demonstratives (and "here / there"). Whole words ("esa" is
 # not "esas"). Not "esta": without accents it is also "está" ("¿a cuánto está el dólar?").
 # Right after a search verb they point at the question instead ("¿qué partidos hay hoy?, buscá
 # eso" was not searched, 2026-10-28) — _unpointed.
+# Seeing and showing point the same way ("el equipo que te estoy mostrando", "what you see"):
+# they were a veto on searching, and "¿cuándo juega el equipo que te estoy mostrando?" searched
+# the sentence without the frame, or not at all (2026-10-28). The model still decides whether
+# the web is needed — "¿qué ves?" is not searched.
 POINTS = ["esto", "eso", "este", "ese", "esa", "estos", "estas", "esos", "esas", "aca", "ahi",
-          "this", "these", "those"]
+          "this", "these", "those", "ves", "veo", "ver", "viendo", "mostrando", "mostre", "mostras",
+          "muestro", "see", "seeing", "showing", "showed"]
 # ...but not before a span of time ("this week", "este año": "Did SpaceX launch anything this
 # week?" was read as pointing at the view, 2026-10-28). Units of time, also a closed class.
 _A_TIME = re.compile(r"\b(este|ese|esta|this|these|those)\s+(fin de semana|finde|semana|mes|ano|anos|"
@@ -198,11 +203,19 @@ def wants_search(question, classifier_url=None):
 # Measured 2026-10-28 on 12 questions: an option "write NONE if the image answers it" made the
 # 4B skip the search on most price / hours / reviews questions — whether to search is the text
 # classifier's call, this only writes the query.
+# "When it is not in the image": "¿Cómo se llamaba el Papa anterior a éste?" pointed at nothing in
+# view, the query described the frame, and the answer came from memory — wrong (2026-10-28).
 IDENTIFY = (
-    "Write the web search query for the question below about this image. Name what it points "
-    "at by what the image shows: the brand, model or name written on it, or which place, "
-    "building or object it is — never words like 'in the image' or 'this'. Add what is asked. "
-    "In the question's language, at most 12 words. Only the query.")
+    "Write the web search query for the question below. When it asks about something in this "
+    "image, name it by what the image shows: the brand, model or name written on it, or which "
+    "place, building or object it is — never words like 'in the image' or 'this'. When what it "
+    "asks about is not in the image (a person, a past event, something it names), write the "
+    "query from the question alone. Add what is asked. In the question's language, at most 12 "
+    "words. Only the query.")
+# Now and then the 4B writes why it cannot instead of a query ("no se puede determinar…"):
+# then the question itself is searched.
+_REFUSES = re.compile(r"^\W*(no (se )?puede|no hay|no es posible|cannot|can'?t|no previous|"
+                      r"unable|not possible)", re.IGNORECASE)
 IDENTIFY_TIMEOUT_S = 6.0
 # What the 4B still adds now and then ("Horario del castillo mostrado en la imagen").
 _IN_THE_IMAGE = re.compile(r"\b((mostrad[oa]|que (se )?ve) )?(en|de) (la|esta) (imagen|foto)\b|"
@@ -226,6 +239,8 @@ def identify_query(question, image_b64, url, model="default", timeout=IDENTIFY_T
         return None
     lines = answer.strip().splitlines()
     query = search_query(_IN_THE_IMAGE.sub(" ", lines[0] if lines else "")).strip(' :"')
+    if _REFUSES.search(query):
+        return None
     return query[:150] or None
 
 
@@ -401,4 +416,4 @@ def search_fact(question, url=SEARXNG_URL, decided=None, earlier=(), image=None,
     return (f"Today is {today}. " + about + " ".join(lines) +
             " Answer in two or three sentences with the fact or figure asked and the name of "
             "the site it comes from (the site, never a number like [4]); if the results do not "
-            "answer it, say so.")
+            "answer it, say so. Do not end with a question or an offer of more help.")

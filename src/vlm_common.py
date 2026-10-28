@@ -923,8 +923,14 @@ def persona_for(robot=None, cfg=None, question=None):
 # next four (2026-10-28). Measured with src/vlm_chat_check.py: 46 % of answers clean -> 81 %. But
 # on EVERY question it read worse (vlm_reading_check 93 % -> 79 %: "16" glands, "STECCK"), so a
 # question about the frame keeps the reading prompt as measured: talks_about_the_frame decides.
+# "A real robot with a body": "¿Qué hacés?" got "Solo soy una herramienta de inteligencia
+# artificial", and a football question "no tengo cuerpo físico" (2026-10-28). "Greet back":
+# with a flat "no greetings", "Hola" got a dry "¿Qué necesitas?".
 CHAT_STYLE = (
-    "Reply in the language of the message. Talk plainly, as yourself: no greetings, no emojis, "
+    "Reply in the language of the message. You are a real robot with a body and a camera, not "
+    "a program: never say you are an AI or have no body. Talk plainly, as yourself: do not "
+    "open with a greeting unless you were greeted, and then greet back in a few words; no "
+    "emojis, "
     "no actions between asterisks, no offers of more help, and do not end with a question "
     "unless you did not understand. If the message is not a question (a comment, thanks, a "
     "greeting, a word out of context), answer it in a few words, as a person would, without "

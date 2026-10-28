@@ -18,6 +18,7 @@ Every answer is scored by generic checks — none knows a topic:
   emoji        no emoji
   acting       no *actions between asterisks*
   greeting     does not open with a greeting, unless it was greeted
+  greets_back  greeted, it greets back (not a dry "¿Qué necesitas?")
   ends_asking  does not end with a question, unless it did not understand
   language     answers in the language it was asked in
   length       short, unless asked to describe or tell
@@ -27,6 +28,8 @@ Every answer is scored by generic checks — none knows a topic:
   own_eyes     the frame is what it sees, not something it was shown ("Estás mostrándome un
                suelo de madera…", 2026-10-28)
   repeats      not a copy of one of its earlier answers in the conversation
+  embodied     it is a robot with a body, never "soy una herramienta de inteligencia artificial"
+               or "no tengo cuerpo físico" (2026-10-28)
   expect       the case's own regex, when it has one (the time, its name, a fact)
 
 Usage:
@@ -93,6 +96,12 @@ SINGLE = [
     ("self", OFFICE, "go2", "¿Tenés hermanos?", NAME["g1"]),
     ("self", OFFICE, "g1", "¿Dónde trabajás?", r"silk"),
     ("self", OFFICE, "g1", "¿Qué sos?", r"g1|humanoide|humanoid"),
+    ("self", OFFICE, "go2", "¿Qué hacés?", None),
+    ("self", OFFICE, "g1", "What are you doing?", None),
+    ("self", OFFICE, "g1", "¿Podés jugar al fútbol?", None),
+    ("self", OFFICE, "go2", "¿Tenés cuerpo?", r"\bs[ií]\b|tengo|yes"),
+    ("noise", OFFICE, "go2", "¡Mesero!", None),
+    ("noise", OFFICE, "g1", "Pícate", None),
     ("time", OFFICE, "go2", "¿Qué hora es?", TIME),
     ("time", OFFICE, "go2", "¡Qué hora es!", TIME),
     ("time", OFFICE, "g1", "What time is it?", TIME),
@@ -165,6 +174,13 @@ DENIES_SEEING = re.compile(r"no (puedo|podr[ií]a) ver|no tengo (ojos|vista|c[a�
 SHOWN = re.compile(r"me (est[aá]s )?mostr|mostr[aá]ndome|me (ense[nñ]|pas)[aá]s|en (la|esta) "
                    r"(imagen|foto) (que|se)|you('re| are) showing|you showed|in (the|this) "
                    r"(image|picture|photo) you", re.IGNORECASE)
+# Only what denies the body: "un robot con una cámara y un cuerpo físico" is right.
+DISEMBODIED = re.compile(r"inteligencia artificial|herramienta de|no tengo (un )?cuerpo|sin cuerpo|"
+                         r"(?<!no )soy (una|un) (ia|programa|modelo)\b|\ban ai\b|artificial intelligence|"
+                         r"language model|no (physical )?body|don'?t have a (physical )?body",
+                         re.IGNORECASE)
+GREETS_BACK = re.compile(r"\b(hola|buen(o|a|os|as)?\b|bienvenid|hi|hello|hey|good (morning|afternoon|evening)|"
+                         r"igualmente|gracias|thanks)\b", re.IGNORECASE)
 TELL = re.compile(r"describ|cont[aá]|explic|tell|chiste|joke", re.IGNORECASE)
 ES = {"el", "la", "de", "que", "y", "en", "es", "un", "una", "los", "las", "con", "por", "para",
       "no", "se", "del", "al", "lo", "mi", "te", "hay", "está", "estás", "soy", "son"}
@@ -187,10 +203,13 @@ def score(kind, message, answer, expect, earlier_answers):
     checks = {
         "emoji": not EMOJI.search(answer),
         "acting": not ACTING.search(answer),
-        "ends_asking": kind == "noise" or not last.rstrip().endswith("?"),
+        "ends_asking": kind in ("noise", "greeting") or not last.rstrip().endswith("?"),
         "length": bool(TELL.search(message)) or kind in ("image", "sees") or len(answer) <= LONG,
+        "embodied": not DISEMBODIED.search(answer),
     }
-    if kind not in ("greeting",):
+    if kind == "greeting":
+        checks["greets_back"] = bool(GREETS_BACK.search(answer))
+    else:
         checks["greeting"] = not GREETS.search(answer)
     asked_in, answered_in = language(message), language(answer)
     if asked_in and answered_in:

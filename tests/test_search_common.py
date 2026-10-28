@@ -174,8 +174,10 @@ def test_asking_and_pointing_are_decided_without_the_model(monkeypatch):
     assert sc.wants_search("buscá quién ganó en Brasil", classifier_url="http://vlm")
     assert sc.wants_search("search who won in Brazil", classifier_url="http://vlm")
     assert not sc.wants_search("¿Qué dice el cartel?", classifier_url="http://vlm")
-    assert not sc.wants_search("what do you see?", classifier_url="http://vlm")
     assert model.asked == []
+    # Seeing points at the view but is no veto: the model says whether the web is needed.
+    assert not sc.wants_search("what do you see?", classifier_url="http://vlm")
+    assert model.asked == ["what do you see?"]
 
 
 def test_without_the_model_only_asking_searches(monkeypatch):
@@ -310,7 +312,9 @@ class _Chat:
     ("¿Qué horario tiene ese castillo?", "both"), ("Where can I buy one of these?", "both"),
     ("¿Cuánto cuesta un Fluke 87?", "web"), ("¿A cuánto esta el dolar?", "web"),
     ("Did SpaceX launch anything this week?", "web"),
-    ("¿Qué dice el cartel?", False), ("What do you see?", False),
+    ("¿Qué dice el cartel?", False), ("What does the screen say?", False),
+    ("¿Cuándo juega el equipo que te estoy mostrando?", "both"),
+    ("When does the team you see play next?", "both"),
 ])
 def test_what_the_question_points_at_decides_the_kind(monkeypatch, question, kind):
     """Catches: "¿cuánto cuesta este multímetro?" searched as "multímetro" without the frame,
