@@ -61,6 +61,7 @@ from pydantic import BaseModel, Field
 import asr_common
 import command_common
 import ear_common
+import keep_common
 import search_common
 import tts_common
 import vlm_common
@@ -473,6 +474,23 @@ async def transcribe(
         "language": res["language"],
         "elapsed_ms": round(res["elapsed"] * 1000, 1),
     }
+
+
+class KeepRequest(BaseModel):
+    text: str = Field("", max_length=4000)
+
+
+@app.post("/keep")
+async def keep(req: KeepRequest):
+    """Does this message ask the robot to keep a picture or a note (keep_common)? The gateway
+    stores it; this only reads the words. `decided` is false when the VLM server could not be
+    asked — the gateway then falls back on its own patterns."""
+    if vlm_common.vlm_backend() != "llamacpp" or not req.text.strip():
+        return {"decided": False, "keep": None, "note": ""}
+    said = await run_in_threadpool(keep_common.wants_kept, req.text, vlm_url())
+    if said is None:
+        return {"decided": False, "keep": None, "note": ""}
+    return {"decided": True, "keep": said[0], "note": said[1]}
 
 
 @app.post("/vlm/stream")
