@@ -51,7 +51,7 @@ from contextlib import asynccontextmanager
 # cross-app dependency). Put it on the path like menu.py does.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "src"))
 
-from fastapi import FastAPI, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
@@ -333,9 +333,23 @@ def options():
     }
 
 
+def _yolo_model(name: str | None) -> str:
+    """The weights a request may name: only those /options lists (bare file names).
+
+    ultralytics downloads any https:// or gs:// name and opens every .pt with pickle, so a
+    free-form name ran whatever code the file carried, as this user, on the machine that
+    drives the robots — reachable by any signed-in viewer through the backend's
+    /api/classes (found 2026-10-28, after Pilot went on the internet).
+    """
+    name = name or CFG.get("yolo_model", "yolov8n.pt")
+    if name not in yolo_common.list_models():
+        raise HTTPException(400, f"unknown YOLO model {name!r}: pick one /options lists")
+    return name
+
+
 @app.get("/classes")
 def classes(model: str = ""):
-    model = model or CFG.get("yolo_model", "yolov8n.pt")
+    model = _yolo_model(model)
     return {"model": model, "classes": yolo_common.class_names(model)}
 
 
@@ -350,6 +364,7 @@ async def detect(
     """Run YOLO on one frame. The image is the raw request body (JPEG/PNG bytes);
     detection params come as query string. Returns the {objects, ...} contract.
     """
+    model = _yolo_model(model)
     data = await request.body()
     if not data:
         return JSONResponse({"error": "empty body (expected image bytes)"}, status_code=400)
@@ -361,7 +376,7 @@ async def detect(
     # Offload the blocking inference to a thread so the event loop stays free.
     res = await run_in_threadpool(
         yolo_common.detect,
-        model or CFG.get("yolo_model", "yolov8n.pt"),
+        model,
         img,
         conf=conf if conf is not None else CFG.get("yolo_conf", 0.25),
         imgsz=imgsz if imgsz is not None else CFG.get("yolo_imgsz", 640),
