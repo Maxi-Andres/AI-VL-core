@@ -172,6 +172,8 @@ class VlmStreamRequest(BaseModel):
     # What the robot knows about itself (battery, link), from the gateway: said only when the
     # question asks about it (vlm_common.state_facts).
     robot_state: dict | None = None
+    # What it was asked to remember ("acordate que…", kept by the gateway): for talk only.
+    robot_notes: list[str] | None = Field(default=None, max_length=100)
 
 
 class SpeakRequest(BaseModel):
@@ -510,6 +512,7 @@ async def vlm_stream(req: VlmStreamRequest):
                 robot=req.robot,
                 history=[t.model_dump() for t in req.history],
                 robot_state=req.robot_state,
+                robot_notes=req.robot_notes,
                 search=search,
                 usage=usage,
             )

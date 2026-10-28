@@ -173,3 +173,15 @@ def test_a_question_about_itself_is_talk():
     assert vc.asks_about_itself("go2", "¿Cuánta batería tenés?", STATE)
     assert vc.asks_about_itself("g1", "¿Quién te creó?")
     assert not vc.asks_about_itself("g1", "¿Cuántos kVA marca?", STATE)
+
+
+def test_what_it_was_asked_to_remember_goes_with_talk_only():
+    """"Acordate que la llave está en el cajón", then "¿dónde está la llave?"."""
+    notes = ["la llave está en el cajón de arriba"]
+    talk = vc.free_prompt_system(question="¿Dónde está la llave?", search=False, chat=True, robot_notes=notes)
+    assert "la llave está en el cajón de arriba" in talk
+    reading = vc.free_prompt_system(question="¿Cuántos kVA marca?", search=False, robot_notes=notes)
+    assert "cajón" not in reading and reading == vc.free_prompt_system(question="¿Cuántos kVA marca?", search=False)
+    # About the frame, but a note answers it: that note goes (it was answered from the picture).
+    where = vc.free_prompt_system(question="¿Dónde está la llave?", search=False, robot_notes=notes)
+    assert "la llave está en el cajón de arriba" in where

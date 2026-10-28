@@ -1042,8 +1042,35 @@ def talks_about_the_frame(question, url, timeout=2.0):
         return True
 
 
+# Words too common to tie a question to a note ("¿dónde está la llave?" ties by "llave").
+_NOTE_STOP = {"esta", "este", "esto", "donde", "cuando", "como", "cual", "quien", "tiene", "tengo",
+              "para", "pero", "porque", "sobre", "with", "where", "what", "when", "which", "there",
+              "that", "this", "have", "your", "from", "about"}
+
+
+def _content_words(text):
+    return {w for w in re.findall(r"[a-z0-9]{4,}", _plain(text)) if w not in _NOTE_STOP}
+
+
+def notes_about(notes, question):
+    """The notes that share a word with `question`: the ones a question about the frame may
+    still need ("¿dónde está la llave del tablero?" was answered from the picture, invented)."""
+    asked = _content_words(question)
+    return [n for n in notes or [] if asked & _content_words(n)]
+
+
+def remembered(notes):
+    """The notes the robot was asked to keep, as one sentence ("" without any)."""
+    notes = [" ".join(str(n).split()) for n in notes or [] if str(n).strip()]
+    if not notes:
+        return ""
+    return ("You were asked to remember these, use them when they answer the message: "
+            + "; ".join(notes) + ".")
+
+
 def free_prompt_system(robot=None, question=None, search=None, earlier=(), image=None,
-                       vlm_url=None, model="default", chat=False, robot_state=None):
+                       vlm_url=None, model="default", chat=False, robot_state=None,
+                       robot_notes=None):
     persona = persona_for(robot, question=question, state=robot_state)
     system = f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
     # Web results, only when the question needs the web (search_common decides, or the caller
@@ -1056,7 +1083,14 @@ def free_prompt_system(robot=None, question=None, search=None, earlier=(), image
                         model=model)
     if found:
         return f"{system} {found}"
-    return f"{system} {CHAT_STYLE}" if chat else system
+    # Talk gets every note. A question about the frame only those that share a word with it:
+    # on a reading every sentence more is a risk (93 % -> 79 %), and "¿cuántos kVA marca?"
+    # shares nothing with "la llave está en el cajón".
+    if chat:
+        notes = remembered(robot_notes)
+        return f"{system} {CHAT_STYLE} {notes}" if notes else f"{system} {CHAT_STYLE}"
+    notes = remembered(notes_about(robot_notes, question))
+    return f"{system} {notes}" if notes else system
 
 
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
@@ -1204,7 +1238,7 @@ def history_messages(history, budget=HISTORY_CHARS):
 
 def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
                      url=OLLAMA_HOST, robot=None, history=None, search=None, usage=None,
-                     robot_state=None):
+                     robot_state=None, robot_notes=None):
     """Stream a FREE-PROMPT answer token by token (a generator of text pieces).
 
     This is the streaming sibling of query_vlm for the "ask anything" case only:
@@ -1242,7 +1276,7 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
                  or not talks_about_the_frame(prompt, url)))
     system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before,
                                     image=img_b64, vlm_url=url, model=model, chat=chat,
-                                    robot_state=robot_state)
+                                    robot_state=robot_state, robot_notes=robot_notes)
     question = {"role": "user", "content": prompt}
     if not search or about_the_image(prompt):
         question["images"] = [img_b64]
