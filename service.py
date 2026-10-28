@@ -169,6 +169,9 @@ class VlmStreamRequest(BaseModel):
     # The conversation so far, oldest first; the newest turns that fit go along as text
     # (vlm_common.history_messages).
     history: list[HistoryTurn] = Field(default_factory=list, max_length=50)
+    # What the robot knows about itself (battery, link), from the gateway: said only when the
+    # question asks about it (vlm_common.state_facts).
+    robot_state: dict | None = None
 
 
 class SpeakRequest(BaseModel):
@@ -506,6 +509,7 @@ async def vlm_stream(req: VlmStreamRequest):
                 url=vlm_url(),
                 robot=req.robot,
                 history=[t.model_dump() for t in req.history],
+                robot_state=req.robot_state,
                 search=search,
                 usage=usage,
             )

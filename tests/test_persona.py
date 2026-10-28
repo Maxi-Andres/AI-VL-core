@@ -137,3 +137,39 @@ def test_a_server_that_cannot_tell_keeps_the_reading_prompt(monkeypatch):
 
     monkeypatch.setattr(vc.requests, "post", down)
     assert vc.talks_about_the_frame("Hola", "http://vlm")
+
+
+STATE = {"name": "Huesos", "online": True, "latency_ms": 42, "link": "lte",
+         "battery": {"percent": 81.6, "charging": False, "temp_c": 33.0, "age_s": 5}}
+
+
+@pytest.mark.parametrize("question, says", [
+    ("¿Cuánta batería tenés?", "your battery is at 82 %, not charging"),
+    ("How much battery do you have?", "your battery is at 82 %"),
+    ("¿Estás cargando?", "not charging"),
+    ("¿Estás caliente?", "your battery pack (not a motor) is at 33 °C"),
+    ("¿Tenés buena señal?", "you are connected over lte, 42 ms round trip"),
+    ("¿Cómo estás?", "your battery is at 82 %"),
+])
+def test_the_robot_tells_its_own_state_when_asked(question, says):
+    """Catches: "¿cuánta batería tenés?" answered without knowing (2026-10-28)."""
+    assert says in vc.persona_for("go2", question=question, state=STATE)
+
+
+@pytest.mark.parametrize("question", ["¿Qué temperatura marca el termómetro?", "Hola", "¿Qué ves?",
+                                      "What is the power factor?"])
+def test_its_state_stays_out_of_other_questions(question):
+    """A reading about a thermometer is not about the robot's own heat."""
+    assert "battery" not in vc.persona_for("go2", question=question, state=STATE)
+
+
+def test_an_old_or_missing_reading_is_said_as_such():
+    old = {"battery": {"percent": 40, "age_s": 1800}}
+    assert "(read 30 min ago)" in vc.persona_for("g1", question="¿Cuánta batería tenés?", state=old)
+    assert "not known" in vc.persona_for("g1", question="¿Cuánta batería tenés?", state={"online": True})
+
+
+def test_a_question_about_itself_is_talk():
+    assert vc.asks_about_itself("go2", "¿Cuánta batería tenés?", STATE)
+    assert vc.asks_about_itself("g1", "¿Quién te creó?")
+    assert not vc.asks_about_itself("g1", "¿Cuántos kVA marca?", STATE)

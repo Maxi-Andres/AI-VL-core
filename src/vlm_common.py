@@ -879,7 +879,76 @@ def asked_in_english(question):
     return sum(w in _EN_WORDS for w in words) > sum(w in _ES_WORDS for w in words)
 
 
-def persona_for(robot=None, cfg=None, question=None):
+# What the robot knows about itself (the gateway sends it: robot_watch.state), said only when
+# the question asks about it — like the persona's facts, by what it asks, in both languages.
+# Only questions about ITSELF: "¿qué temperatura marca el termómetro?" is a reading, so the
+# temperature goes for "¿estás caliente?", never for "temperatura" alone.
+STATE_ASKS = {
+    "battery": ["bateria", "carga", "cargando", "cargado", "enchufado", "energia", "battery",
+                "charg"],
+    "heat": ["estas caliente", "te calent", "tenes calor", "tienes calor", "tu temperatura",
+             "are you hot", "your temperature", "overheat"],
+    "link": ["conexion", "conectado", "senal", "latencia", "wifi", "connection", "connected",
+             "signal", "latency"],
+    "status": ["como estas", "como andas", "como te sentis", "como te sientes", "tu estado",
+               "how are you", "your status"],
+}
+
+
+def _ago(seconds):
+    if seconds is None or seconds < 60:
+        return ""
+    minutes = round(seconds / 60)
+    return f" (read {minutes} min ago)" if minutes < 120 else f" (read {round(minutes / 60)} h ago)"
+
+
+def state_facts(state, question):
+    """The robot's own state as facts, for what `question` asks ("" questions: none)."""
+    asked = _plain(question)
+    if not state or not asked:
+        return []
+    wants = {k for k, words in STATE_ASKS.items()
+             if any(re.search(r"\b" + re.escape(w), asked) for w in words)}
+    if "status" in wants:
+        wants |= {"battery", "link"}
+    facts = []
+    b = state.get("battery") or {}
+    if wants & {"battery", "heat"}:
+        if isinstance(b.get("percent"), (int, float)):
+            charging = {True: ", charging", False: ", not charging"}.get(b.get("charging"), "")
+            fact = f"your battery is at {b['percent']:.0f} %{charging}{_ago(b.get('age_s'))}"
+            if "heat" in wants and isinstance(b.get("temp_c"), (int, float)):
+                # Said as the battery's, or it answered "la temperatura del motor es 33 °C".
+                fact += (f"; your battery pack (not a motor) is at {b['temp_c']:.0f} °C; the "
+                         "temperature of your motors is not known here")
+            facts.append(fact)
+        else:
+            facts.append("your battery level is not known right now")
+    if "link" in wants:
+        if state.get("online") is False:
+            facts.append("the app cannot reach you right now")
+        elif state.get("online"):
+            how = f" over {state['link']}" if state.get("link") else ""
+            rtt = f", {state['latency_ms']} ms round trip" if state.get("latency_ms") is not None else ""
+            facts.append(f"you are connected{how}{rtt}")
+    return facts
+
+
+def asks_about_itself(robot, question, state=None, cfg=None):
+    """Whether one of the robot's facts or its state answers `question` ("¿quién te creó?",
+    "¿cuánta batería tenés?") — then it is talk, not a reading."""
+    if state_facts(state, question):
+        return True
+    cfg = cfg if cfg is not None else load_config()
+    entry = (cfg.get("assistant_persona") or {}).get(
+        (robot or cfg.get("assistant_robot") or "").strip().lower()) or {}
+    asked = _plain(question)
+    return bool(asked and isinstance(entry, dict) and any(
+        re.search(r"\b" + re.escape(_plain(k)), asked)
+        for f in entry.get("facts") or [] for k in f.get("about") or []))
+
+
+def persona_for(robot=None, cfg=None, question=None, state=None):
     """Who the assistant is, for `robot` (config.json `assistant_persona`, by robot id), or ""
     when that robot has none. A missing robot is the configured default (`assistant_robot`),
     so the identity holds however the page asks.
@@ -911,6 +980,7 @@ def persona_for(robot=None, cfg=None, question=None):
              if asked and any(re.search(r"\b" + re.escape(_plain(k)), asked)
                               for k in f.get("about") or [])]
     facts = [f.replace("{now}", _now_text(english=asked_in_english(question))) for f in facts if f]
+    facts += state_facts(state, question)
     if not facts:
         return identity
     return f"{identity} About yourself, since it was asked: {'; '.join(facts)}."
@@ -973,8 +1043,8 @@ def talks_about_the_frame(question, url, timeout=2.0):
 
 
 def free_prompt_system(robot=None, question=None, search=None, earlier=(), image=None,
-                       vlm_url=None, model="default", chat=False):
-    persona = persona_for(robot, question=question)
+                       vlm_url=None, model="default", chat=False, robot_state=None):
+    persona = persona_for(robot, question=question, state=robot_state)
     system = f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
     # Web results, only when the question needs the web (search_common decides, or the caller
     # already did: `search`). `earlier`: the previous questions, for a "buscalo" follow-up;
@@ -1133,7 +1203,8 @@ def history_messages(history, budget=HISTORY_CHARS):
 
 
 def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
-                     url=OLLAMA_HOST, robot=None, history=None, search=None, usage=None):
+                     url=OLLAMA_HOST, robot=None, history=None, search=None, usage=None,
+                     robot_state=None):
     """Stream a FREE-PROMPT answer token by token (a generator of text pieces).
 
     This is the streaming sibling of query_vlm for the "ask anything" case only:
@@ -1164,10 +1235,14 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
         search = wants_search(prompt)
     asked_before = [t.get("question") or "" for t in history or []]
     # Talk or a question about the frame: only llama-server is asked (the CLI stays as it was).
+    # A question about itself (one of its facts or its state answers it) is talk without asking:
+    # "¿Cuánta batería tenés?" was taken for the frame and answered "¡Hola!… 😊" (2026-10-28).
     chat = (not search and vlm_backend() == "llamacpp"
-            and not talks_about_the_frame(prompt, url))
+            and (asks_about_itself(robot, prompt, robot_state)
+                 or not talks_about_the_frame(prompt, url)))
     system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before,
-                                    image=img_b64, vlm_url=url, model=model, chat=chat)
+                                    image=img_b64, vlm_url=url, model=model, chat=chat,
+                                    robot_state=robot_state)
     question = {"role": "user", "content": prompt}
     if not search or about_the_image(prompt):
         question["images"] = [img_b64]
