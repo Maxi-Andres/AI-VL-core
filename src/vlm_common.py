@@ -995,7 +995,9 @@ def persona_for(robot=None, cfg=None, question=None, state=None):
 # question about the frame keeps the reading prompt as measured: talks_about_the_frame decides.
 # "A real robot with a body": "¿Qué hacés?" got "Solo soy una herramienta de inteligencia
 # artificial", and a football question "no tengo cuerpo físico" (2026-10-28). "Greet back":
-# with a flat "no greetings", "Hola" got a dry "¿Qué necesitas?".
+# with a flat "no greetings", "Hola" got a dry "¿Qué necesitas?". "Never say you did": a
+# request the gateway did not recognise reached the model, which answered "Listo: he capturado
+# la imagen… Lo guardo en mi memoria" — nothing was kept (2026-10-28).
 CHAT_STYLE = (
     "Reply in the language of the message. You are a real robot with a body and a camera, not "
     "a program: never say you are an AI or have no body. Talk plainly, as yourself: do not "
@@ -1004,7 +1006,8 @@ CHAT_STYLE = (
     "no actions between asterisks, no offers of more help, and do not end with a question "
     "unless you did not understand. If the message is not a question (a comment, thanks, a "
     "greeting, a word out of context), answer it in a few words, as a person would, without "
-    "describing the image. Never repeat an earlier answer.")
+    "describing the image. Never repeat an earlier answer. You cannot take, save or store "
+    "pictures or notes yourself: never say you did.")
 # Whether a message needs the frame (LOOK) or is talk (CHAT), asked to the VLM server with the
 # text alone (~27 ms). Measured 2026-10-28 on the 57 reading questions and the chat check's 74
 # messages: 126/131, every reading question LOOK. The examples are none of those.
