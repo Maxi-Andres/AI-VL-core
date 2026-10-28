@@ -992,10 +992,44 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
 # The conversation so far, as text, rides on each question (2026-10-28). Only text: an old
 # frame costs ~1000-1300 tokens, a question with its answer ~100-300, and the server's window
 # is 4096 (vlm-server.sh VLM_CTX) for the frame, the system message, the turns and the answer.
-# The newest turns that fit this many characters go (~3.5 characters a token in Spanish:
-# ~1400 tokens); older ones drop off. More, and bigger windows, wait for a bigger card
-# (.claude/roadmap/PLATAFORMA.md, "El asistente como un LLM de verdad").
+# The newest turns that fit go; older ones drop off. On llama-server the room is what the
+# window leaves (history_budget); elsewhere, with no window to read, HISTORY_CHARS. More, and
+# bigger windows, wait for a bigger card (.claude/roadmap/PLATAFORMA.md, "El asistente como un
+# LLM de verdad").
 HISTORY_CHARS = 5000
+# Measured on the 4B's tokenizer, 2026-10-28: 3.6 characters a token in Spanish, 4.3 in
+# English; the lower one so the estimate never overflows.
+CHARS_PER_TOKEN = 3.5
+FRAME_TOKENS = 1100       # a frame whose size cannot be read
+ANSWER_TOKENS = 512       # kept for the answer: most are 50-300
+TURN_OVERHEAD_CHARS = 40  # the chat template's markers around a question and its answer
+
+
+def frame_tokens(img_b64):
+    """What the frame costs the 4B: one token per 32x32 block, never under the server's
+    --image-min-tokens (config llamacpp_image_min_tokens), plus the markers around it.
+    Measured 2026-10-28: 1600x1200 took 1911 (1900 blocks), 615x410 took 1091 (the floor)."""
+    try:
+        import io
+
+        from PIL import Image
+        w, h = Image.open(io.BytesIO(base64.b64decode(img_b64))).size
+    except Exception:   # any frame it cannot read: the usual size
+        return FRAME_TOKENS
+    floor = int(load_config().get("llamacpp_image_min_tokens") or 0)
+    return max(floor, -(-w // 32) * -(-h // 32)) + 64
+
+
+def history_budget(window, system_msg, prompt, frame):
+    """Characters of earlier turns that fit `window` tokens next to the system message, the
+    question, the frame (`frame` tokens, 0 without it) and the answer. A fixed 5000 forgot the first questions with 1.3k
+    tokens still free (2026-10-28); this forgets only when the window is full."""
+    if not window:
+        # The web results make the system message long; the conversation gives way to them.
+        return max(1500, HISTORY_CHARS - max(0, len(system_msg) - 1000))
+    room = (window - ANSWER_TOKENS - frame
+            - (len(system_msg) + len(prompt)) / CHARS_PER_TOKEN)
+    return max(0, int(room * CHARS_PER_TOKEN))
 
 
 def history_messages(history, budget=HISTORY_CHARS):
@@ -1008,9 +1042,10 @@ def history_messages(history, budget=HISTORY_CHARS):
         a = str((turn or {}).get("answer") or "").strip()
         if not q or not a:
             continue
-        if used + len(q) + len(a) > budget:
+        cost = len(q) + len(a) + TURN_OVERHEAD_CHARS
+        if used + cost > budget:
             break
-        used += len(q) + len(a)
+        used += cost
         turns.append((q, a))
     messages = []
     for q, a in reversed(turns):
@@ -1054,14 +1089,17 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     question = {"role": "user", "content": prompt}
     if not search or about_the_image(prompt):
         question["images"] = [img_b64]
-    earlier = history_messages(history, budget=max(1500, HISTORY_CHARS - max(0, len(system_msg) - 1000)))
+    window = llamacpp_window(url) if vlm_backend() == "llamacpp" else None
+    frame = frame_tokens(img_b64) if "images" in question else 0
+    earlier = history_messages(history, budget=history_budget(window, system_msg, prompt, frame))
     supports_think = model_supports_thinking(model, url)
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system_msg},
-            # Web results make the system message long; the conversation gives way to them,
-            # or the frame, the results, the turns and the answer would not fit the window.
+            # Web results make the system message long; the conversation gives way to them
+            # (history_budget), or the frame, the results, the turns and the answer would not
+            # fit the window.
             *earlier,
             question,
         ],
@@ -1084,7 +1122,8 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
             if usage is not None and chunk.get("usage"):
                 usage["prompt_tokens"] = chunk["usage"].get("prompt_tokens")
                 usage["completion_tokens"] = chunk["usage"].get("completion_tokens")
-                usage["window"] = llamacpp_window(url)
+                usage["window"] = window
+                usage["answer_room"] = ANSWER_TOKENS   # never given to the conversation
             piece = ((chunk.get("choices") or [{}])[0].get("delta") or {}).get("content")
             if piece:
                 yield piece

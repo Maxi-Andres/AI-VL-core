@@ -71,11 +71,48 @@ def test_the_stream_ends_saying_how_full_the_window_is(client, monkeypatch):
               {"choices": [], "usage": {"prompt_tokens": 1500, "completion_tokens": 20}}]
     monkeypatch.setattr(vc, "_openai_chunks", lambda payload, url, timeout: iter(chunks))
     monkeypatch.setattr(vc, "llamacpp_window", lambda url=None: 4096)
-    turns = [{"question": f"q{i}", "answer": "x" * 2000} for i in range(4)]
+    turns = [{"question": f"q{i}", "answer": "x" * 3000} for i in range(4)]   # 2 fit in 4096
     text = client.post("/vlm/stream", json={"image": "aGk=", "prompt": "¿Y la silla?", "history": turns}).text
     answer, mark = text.split(vc.USAGE_MARK)
     assert answer == "Marrón."
     import json
     usage = json.loads(mark.rstrip("\x1e"))
     assert usage == {"turns_sent": 2, "turns_total": 4, "prompt_tokens": 1500,
-                     "completion_tokens": 20, "window": 4096}
+                     "completion_tokens": 20, "window": 4096, "answer_room": vc.ANSWER_TOKENS}
+
+
+def test_the_turns_fill_the_window_not_a_fixed_cap():
+    """Catches: the first questions forgotten with 1.3k of 4.1k tokens still free (a fixed
+    5000 characters, 2026-10-28)."""
+    system = vc.FREE_PROMPT_SYSTEM
+    budget = vc.history_budget(4096, system, "¿y el de la izquierda?", frame=1100)
+    assert budget > 7000
+    used = 1100 + (len(system) + budget) / vc.CHARS_PER_TOKEN + vc.ANSWER_TOKENS
+    assert used <= 4096, "the frame, the turns and the answer must still fit"
+
+
+def test_web_results_and_no_frame_move_the_room():
+    results = "x" * 3500
+    with_results = vc.history_budget(4096, results, "q", frame=0)
+    plain = vc.history_budget(4096, "s", "q", frame=1100)
+    assert with_results < plain + 1100 * vc.CHARS_PER_TOKEN
+    assert vc.history_budget(4096, "x" * 20000, "q", frame=1100) == 0
+    assert vc.history_budget(None, "s", "q", frame=1100) == vc.HISTORY_CHARS, "no window: the old cap"
+
+
+def test_a_big_frame_leaves_less_room():
+    """Catches: a 1600x1200 photo costing 1911 tokens, not the 1100 assumed, and the answer left
+    with ~330 tokens (2026-10-28)."""
+    import base64
+    import io
+
+    from PIL import Image
+
+    def jpeg(w, h):
+        buf = io.BytesIO()
+        Image.new("RGB", (w, h)).save(buf, "JPEG")
+        return base64.b64encode(buf.getvalue()).decode()
+
+    assert vc.frame_tokens(jpeg(1600, 1200)) >= 1900
+    assert 1024 <= vc.frame_tokens(jpeg(615, 410)) < 1100, "the server's floor"
+    assert vc.frame_tokens("bm90IGFuIGltYWdl") == vc.FRAME_TOKENS
