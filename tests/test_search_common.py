@@ -282,10 +282,11 @@ def test_after_a_search_the_model_is_told_it_did_search(asked):
     assert "never say you cannot search" in sc.search_fact("¿Cuánto está el dólar hoy?", decided=True)
 
 
-def test_without_a_search_the_model_offers_one():
-    assert "ask you to search the internet" in vc.free_prompt_system(question="¿Quién ganó?", search=False)
-    assert "search" not in vc.free_prompt_system(question="¿Qué dice el cartel?", search=False), \
-        "reading prompts stay as measured"
+def test_talk_gets_the_chat_style_and_a_reading_question_does_not():
+    """Catches: the style on every question — reading fell from 93 % to 79 % (2026-10-28)."""
+    assert vc.CHAT_STYLE in vc.free_prompt_system(question="¡Qué bueno es!", search=False, chat=True)
+    reading = vc.free_prompt_system(question="¿Cuántos kVA marca?", search=False)
+    assert vc.CHAT_STYLE not in reading and reading.startswith(vc.FREE_PROMPT_SYSTEM)
 
 
 class _Chat:

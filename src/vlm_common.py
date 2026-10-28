@@ -454,6 +454,11 @@ DEFAULT_CONFIG = {
             "identity": "You are Bender, a calm and helpful robot, not the cartoon character. "
                         "The image is what your own camera sees in front of you.",
             "facts": [
+                # "¿Quién sos?" got "Soy un asistente de inteligencia artificial" with the name
+                # in the identity (2026-10-28): asked for, it is said again as a fact.
+                {"about": ["quien sos", "quien eres", "quien es usted", "como te llamas",
+                           "tu nombre", "llamas", "who are you", "your name"],
+                 "fact": "your name is Bender"},
                 {"about": ["que sos", "que eres", "que robot", "modelo", "unitree", "g1",
                            "humanoide", "what are you"],
                  "fact": "you are a Unitree G1 humanoid robot"},
@@ -480,6 +485,11 @@ DEFAULT_CONFIG = {
             "identity": "You are Huesos, a calm and helpful robot dog. "
                         "The image is what your own camera sees in front of you.",
             "facts": [
+                # "¿Quién sos?" got "Soy un asistente de inteligencia artificial" with the name
+                # in the identity (2026-10-28): asked for, it is said again as a fact.
+                {"about": ["quien sos", "quien eres", "quien es usted", "como te llamas",
+                           "tu nombre", "llamas", "who are you", "your name"],
+                 "fact": "your name is Huesos"},
                 {"about": ["que sos", "que eres", "que robot", "modelo", "unitree", "go2",
                            "what are you"],
                  "fact": "you are a Unitree Go2 robot dog"},
@@ -840,13 +850,33 @@ _MONTHS = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agos
            "septiembre", "octubre", "noviembre", "diciembre"]
 
 
-def _now_text(now=None):
+def _now_text(now=None, english=False):
     """This machine's local time, in words the answer can repeat: "13:19 on lunes 19 de
     octubre de 2026". The model has no clock; asked the time, it now says "Es 13:19, lunes 19
-    de octubre de 2026" (2026-10-19)."""
+    de octubre de 2026" (2026-10-19). In English for a question in English: it answered "What
+    time is it?" with "14:23 on miércoles 28 de octubre" (2026-10-28)."""
+    import calendar  # English names whatever the locale: it is never set in this process
     import datetime
     now = now or datetime.datetime.now()
+    if english:
+        return (f"{now:%H:%M} on {calendar.day_name[now.weekday()]} {now.day} "
+                f"{calendar.month_name[now.month]} {now.year}")
     return f"{now:%H:%M} on {_DAYS[now.weekday()]} {now.day} de {_MONTHS[now.month - 1]} de {now.year}"
+
+
+# Function words, the most frequent of each language: enough to tell which one a question is in.
+_ES_WORDS = {"que", "el", "la", "los", "las", "de", "es", "un", "una", "en", "y", "hay", "por",
+             "como", "cual", "cuanto", "donde", "quien", "sos", "eres", "estas", "hoy"}
+_EN_WORDS = {"what", "the", "is", "are", "a", "an", "it", "of", "in", "and", "there", "how",
+             "which", "where", "who", "you", "your", "today", "this", "do", "does"}
+
+
+def asked_in_english(question):
+    """Whether a question is in English rather than Spanish (Spanish when it cannot tell)."""
+    if re.search(r"[¿¡ñáéíóú]", question or "", re.IGNORECASE):
+        return False
+    words = re.findall(r"[a-z']+", (question or "").lower())
+    return sum(w in _EN_WORDS for w in words) > sum(w in _ES_WORDS for w in words)
 
 
 def persona_for(robot=None, cfg=None, question=None):
@@ -880,34 +910,77 @@ def persona_for(robot=None, cfg=None, question=None):
     facts = [str(f.get("fact") or "").strip() for f in entry.get("facts") or []
              if asked and any(re.search(r"\b" + re.escape(_plain(k)), asked)
                               for k in f.get("about") or [])]
-    facts = [f.replace("{now}", _now_text()) for f in facts if f]
+    facts = [f.replace("{now}", _now_text(english=asked_in_english(question))) for f in facts if f]
     if not facts:
         return identity
     return f"{identity} About yourself, since it was asked: {'; '.join(facts)}."
 
 
-# When no search was made: the model answered "No tengo acceso a internet, consultá ESPN…", and
-# the person did not know it could search when asked (2026-10-28).
-NOT_SEARCHED = ("If the question needs current information you do not have (news, results, "
-                "prices, weather), say so briefly and that they can ask you to search the "
-                "internet for it.")
+# How it talks — only to what is not about the frame (a greeting, thanks, a comment, a question
+# about itself or general knowledge). Without it the persona greeted ("¡Hola! 🤖"), acted
+# ("*paws at the camera*"), ended everything with "¿Te gustaría saber algo más? 😊", answered a
+# passing "¡Qué bueno es!" with the floor of the frame, and copied its own earlier answer into the
+# next four (2026-10-28). Measured with src/vlm_chat_check.py: 46 % of answers clean -> 81 %. But
+# on EVERY question it read worse (vlm_reading_check 93 % -> 79 %: "16" glands, "STECCK"), so a
+# question about the frame keeps the reading prompt as measured: talks_about_the_frame decides.
+CHAT_STYLE = (
+    "Reply in the language of the message. Talk plainly, as yourself: no greetings, no emojis, "
+    "no actions between asterisks, no offers of more help, and do not end with a question "
+    "unless you did not understand. If the message is not a question (a comment, thanks, a "
+    "greeting, a word out of context), answer it in a few words, as a person would, without "
+    "describing the image. Never repeat an earlier answer.")
+# Whether a message needs the frame (LOOK) or is talk (CHAT), asked to the VLM server with the
+# text alone (~27 ms). Measured 2026-10-28 on the 57 reading questions and the chat check's 74
+# messages: 126/131, every reading question LOOK. The examples are none of those.
+LOOKS = (
+    "Classify a message said to a robot. CHAT: a greeting, thanks, praise, a comment, small "
+    "talk, how it feels, a question about the robot itself (its name, who made it, where it "
+    "works), the time or date, general knowledge, or words that make no sense. LOOK: a question "
+    "or request about what is in front of the robot's camera: what is there, what it reads or "
+    "shows, its brand, model, value or state. One word: CHAT or LOOK.")
+LOOKS_EXAMPLES = [
+    ("Buenas tardes", "CHAT"), ("¿Qué hay sobre la mesa?", "LOOK"),
+    ("Excelente, te pasaste", "CHAT"), ("¿De qué marca es la heladera?", "LOOK"),
+    ("¿Cuántos años tenés?", "CHAT"), ("¿Cuánto marca?", "LOOK"), ("Ajá, ok", "CHAT"),
+    ("How far is the moon?", "CHAT"), ("Is the door open?", "LOOK"),
+]
+
+
+def talks_about_the_frame(question, url, timeout=2.0):
+    """True when answering needs the frame (or it cannot be told): the reading prompt stays.
+    False for talk, which gets CHAT_STYLE. Pointing at the view decides without the model."""
+    from search_common import about_the_image
+    if not question or about_the_image(question):
+        return True
+    shots = []
+    for text, label in LOOKS_EXAMPLES:
+        shots += [{"role": "user", "content": text}, {"role": "assistant", "content": label}]
+    try:
+        r = requests.post(f"{host_of(url)}/v1/chat/completions", timeout=timeout, json={
+            "model": "default", "temperature": 0, "max_tokens": 3,
+            "messages": [{"role": "system", "content": LOOKS}, *shots,
+                         {"role": "user", "content": question}]})
+        r.raise_for_status()
+        return not r.json()["choices"][0]["message"]["content"].strip().upper().startswith("CHAT")
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
+        return True
 
 
 def free_prompt_system(robot=None, question=None, search=None, earlier=(), image=None,
-                       vlm_url=None, model="default"):
+                       vlm_url=None, model="default", chat=False):
     persona = persona_for(robot, question=question)
     system = f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
     # Web results, only when the question needs the web (search_common decides, or the caller
     # already did: `search`). `earlier`: the previous questions, for a "buscalo" follow-up;
     # `image`, `vlm_url`, `model`: for a question about something in view, whose query the model
-    # writes looking at the frame.
-    # Not on a question about the picture: reading prompts stay as they were measured.
-    from search_common import about_the_image, search_fact
+    # writes looking at the frame. `chat`: not about the frame (talks_about_the_frame), so
+    # CHAT_STYLE goes too.
+    from search_common import search_fact
     found = search_fact(question, decided=search, earlier=earlier, image=image, vlm_url=vlm_url,
                         model=model)
     if found:
         return f"{system} {found}"
-    return f"{system} {NOT_SEARCHED}" if question and not about_the_image(question) else system
+    return f"{system} {CHAT_STYLE}" if chat else system
 
 
 def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
@@ -1084,8 +1157,11 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     if search is None:
         search = wants_search(prompt)
     asked_before = [t.get("question") or "" for t in history or []]
+    # Talk or a question about the frame: only llama-server is asked (the CLI stays as it was).
+    chat = (not search and vlm_backend() == "llamacpp"
+            and not talks_about_the_frame(prompt, url))
     system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before,
-                                    image=img_b64, vlm_url=url, model=model)
+                                    image=img_b64, vlm_url=url, model=model, chat=chat)
     question = {"role": "user", "content": prompt}
     if not search or about_the_image(prompt):
         question["images"] = [img_b64]

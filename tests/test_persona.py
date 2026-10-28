@@ -9,6 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
+import pytest
+
 import vlm_common as vc
 
 
@@ -83,3 +85,55 @@ def test_the_stream_carries_the_identity_upstream(monkeypatch):
     monkeypatch.setattr(vc, "_openai_chunks", fake_chunks)
     assert list(vc.query_vlm_stream("QUJD", "m", "¿Me ves?", url="http://x", robot="g1")) == ["Sí."]
     assert "Bender" in sent["messages"][0]["content"]
+
+
+def test_the_time_is_said_in_the_language_asked():
+    """Catches: "What time is it?" answered "14:23 on miércoles 28 de octubre" (2026-10-28)."""
+    import datetime
+    now = datetime.datetime(2026, 10, 28, 14, 23)
+    assert vc._now_text(now, english=True) == "14:23 on Wednesday 28 October 2026"
+    assert vc._now_text(now) == "14:23 on miércoles 28 de octubre de 2026"
+    assert vc.asked_in_english("What time is it?")
+    assert not vc.asked_in_english("¿Qué hora es?") and not vc.asked_in_english("que hora es")
+
+
+class _Said:
+    def __init__(self, label):
+        self.label, self.sent = label, []
+
+    def __call__(self, url, timeout=None, json=None):
+        self.sent.append(json)
+        return self
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"choices": [{"message": {"content": self.label}}]}
+
+
+@pytest.mark.real_looks
+def test_talk_is_told_from_a_question_about_the_frame(monkeypatch):
+    said = _Said("CHAT")
+    monkeypatch.setattr(vc.requests, "post", said)
+    assert not vc.talks_about_the_frame("¡Qué bueno es!", "http://vlm")
+    assert said.sent[0]["messages"][-1]["content"] == "¡Qué bueno es!"
+    said.label = "LOOK"
+    assert vc.talks_about_the_frame("¿Cuántos kVA marca?", "http://vlm")
+
+
+@pytest.mark.real_looks
+def test_pointing_at_the_view_is_the_frame_without_asking(monkeypatch):
+    said = _Said("CHAT")
+    monkeypatch.setattr(vc.requests, "post", said)
+    assert vc.talks_about_the_frame("¿Qué es esto?", "http://vlm")
+    assert said.sent == []
+
+
+@pytest.mark.real_looks
+def test_a_server_that_cannot_tell_keeps_the_reading_prompt(monkeypatch):
+    def down(*a, **k):
+        raise vc.requests.ConnectionError("refused")
+
+    monkeypatch.setattr(vc.requests, "post", down)
+    assert vc.talks_about_the_frame("Hola", "http://vlm")
