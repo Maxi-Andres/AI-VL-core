@@ -1033,7 +1033,7 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     knows what it follows. The image is only the current frame.
 
     `search`: whether this question needs the web, when the caller decided it already (None:
-    decided here, by keyword). A searched question that does not point at what is in view goes
+    decided here: only an explicit ask). A searched question that does not point at what is in view goes
     WITHOUT the frame: with it, the model kept answering "la imagen es de una habitación, no
     tiene información sobre partidos" before the results (2026-10-28).
 

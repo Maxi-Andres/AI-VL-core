@@ -14,7 +14,9 @@ Whether to search (wants_search), in this order:
      Measured 2026-10-28 on 42 questions (image, the robot itself, general knowledge, and
      news / sports / prices / weather / schedules / office holders): 41 right, ~27 ms each on
      the 4B. A keyword list had gaps with every new topic ("¿cuándo juega River?");
-  4. no model to ask (Ollama backend, server down): the topic keywords, in both languages.
+  4. no model to ask (Ollama backend, server down): no — only an explicit ask (step 1)
+     searches. There is deliberately no topic list: every topic would need its own words, in
+     two languages (dropped 2026-10-28).
 Plan: .claude/roadmap/PLATAFORMA.md, "Bender útil" §1.
 """
 
@@ -57,17 +59,6 @@ ASKS_TO_SEARCH = ["busc", "averigu", "search", "look up", "look it up", "find ou
 ABOUT_THE_IMAGE = ["imagen", "foto", "camara", "pantalla", "cartel", "letrero", "frente", "ves",
                    "veo", "esto", "eso", "esa", "ese", "aca", "ahi", "image", "picture", "photo",
                    "camera", "screen", "sign", "this", "see"]
-# 4. Without a model: topics only the web has.
-TOPICS = [
-    "noticia", "novedad", "ultimo momento", "news", "headline",
-    "clima", "pronostico", "llover", "llueve", "lluvia", "weather", "forecast", "rain",
-    "precio", "cuanto cuesta", "cuanto sale", "cuanto vale", "cotizacion", "dolar", "euro",
-    "price", "how much", "exchange rate",
-    "juega", "partido", "fixture", "quien gano", "resultado", "campeonato", "torneo", "mundial",
-    "match", "who won", "score", "league",
-    "cuando es", "cuando sale", "cuando viene", "cuando abre", "a que hora", "estreno",
-    "elecciones", "presidente", "when is", "what time", "opening hours", "election", "president",
-]
 # What the model is told, for step 3 (wording measured, see the module docstring).
 CLASSIFIER = (
     "The person is looking at a live camera image and asking a robot assistant. Decide if their "
@@ -86,11 +77,9 @@ FIGURE = ["precio", "cuanto", "cotizacion", "dolar", "euro", "temperatura", "gra
           "how much", "rate", "temperature", "cost"]
 _NUMBER = re.compile(r"\d[\d.,]*")
 
-# Questions after a date, an hour or a result: like FIGURE, the snippets are front pages
-# ("consultá las fechas…") and the answer is inside the page (ESPN's calendar: "Dom., 1 de Nov.
-# Boca Juniors v River Plate 3:00 PM"). For these, and for FIGURE, the first pages are READ.
-WHEN = ["cuando", "a que hora", "fecha", "horario", "dia", "quien gano", "resultado", "salio",
-        "when", "what time", "date", "schedule", "day", "who won", "result", "score"]
+# The first pages of every search are READ: the snippets are often front pages ("consultá las
+# fechas…") and the answer is inside the page (ESPN's calendar: "Dom., 1 de Nov. Boca Juniors v
+# River Plate 3:00 PM"). It was only for questions with date words, a list that never ends.
 PAGES = 3                 # read at most this many, at the same time
 PAGE_TIMEOUT_S = 3.0      # each; a slow site is skipped, the snippets still go
 PAGE_BYTES = 1_500_000
@@ -167,7 +156,7 @@ def model_says_web(question, url, timeout=CLASSIFIER_TIMEOUT_S):
 
 def wants_search(question, classifier_url=None):
     """True when the question needs the web (the order is in the module docstring).
-    `classifier_url`: the llama-server to ask in step 3; without it, the topic keywords."""
+    `classifier_url`: the llama-server to ask in step 3; without it, only an explicit ask."""
     q = _plain(question)
     if not q:
         return False
@@ -179,10 +168,8 @@ def wants_search(question, classifier_url=None):
     if image:
         return False
     if classifier_url:
-        decided = model_says_web(question, classifier_url)
-        if decided is not None:
-            return decided
-    return _has(q, TOPICS)
+        return bool(model_says_web(question, classifier_url))
+    return False
 
 
 def _topic(question):
@@ -315,9 +302,8 @@ def search_fact(question, url=SEARXNG_URL, decided=None, earlier=()):
     query = search_query(question, earlier)
     t0 = time.monotonic()
     try:
-        asked = _plain(question)
-        results = search(query, url=url, figure=_has(asked, FIGURE))
-        if results and (_has(asked, FIGURE) or _has(asked, WHEN)):
+        results = search(query, url=url, figure=_has(_plain(question), FIGURE))
+        if results:
             read_pages(results, query)
     except (requests.RequestException, ValueError) as e:
         print(f"[search] {query!r} failed after {time.monotonic() - t0:.1f}s: {type(e).__name__}",

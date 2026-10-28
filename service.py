@@ -491,7 +491,7 @@ async def vlm_stream(req: VlmStreamRequest):
     def gen():
         try:
             # Whether it needs the web, decided once: by the llama-server itself (~27 ms, text
-            # only) when that is the backend, else by keyword (search_common.wants_search).
+            # only) when that is the backend, else only when asked (search_common.wants_search).
             usage = {}
             classifier = vlm_url() if vlm_common.vlm_backend() == "llamacpp" else None
             search = search_common.wants_search(prompt, classifier_url=classifier)

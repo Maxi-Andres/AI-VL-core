@@ -51,12 +51,11 @@ def asked(monkeypatch):
 
 @pytest.mark.parametrize("question", [
     "Bender, buscá en internet cuánto está el dólar blue",
-    "¿Cuál es la cotización del dólar hoy?",
-    "¿Va a llover mañana en Buenos Aires?",
-    "¿Qué noticias hay de la Fórmula 1?",
+    "averiguá si va a llover mañana en Buenos Aires",
     "Search the weather in Madrid",
+    "look up the news about Formula 1",
 ])
-def test_questions_for_the_web_are_searched(question):
+def test_asking_to_search_searches_without_a_model(question):
     assert sc.wants_search(question)
 
 
@@ -97,7 +96,7 @@ def test_a_failed_search_is_said_not_guessed(monkeypatch):
         raise requests.ConnectionError("refused")
 
     monkeypatch.setattr(sc.requests, "get", down)
-    fact = sc.search_fact("¿Cuánto está el dólar hoy?")
+    fact = sc.search_fact("¿Cuánto está el dólar hoy?", decided=True)
     assert "could not search the internet" in fact and "do not guess" in fact
 
 
@@ -123,7 +122,7 @@ def test_the_stream_says_it_is_searching_first(monkeypatch):
     monkeypatch.setattr(vc, "vlm_backend", lambda: "llamacpp")
     monkeypatch.setattr(vc, "model_supports_thinking", lambda *a, **k: False)
     monkeypatch.setattr(vc, "_openai_chunks", lambda *a: iter([{"choices": [{"delta": {"content": "$1.575"}}]}]))
-    monkeypatch.setattr(sc, "model_says_web", lambda q, url: None)   # keywords decide here
+    monkeypatch.setattr(sc, "model_says_web", lambda q, url: "dólar" in q)   # the model's call
     with TestClient(service.app) as c:
         searched = c.post("/vlm/stream", json={"image": "aGk=", "prompt": "¿Cuánto está el dólar?"}).text
         plain = c.post("/vlm/stream", json={"image": "aGk=", "prompt": "¿Qué ves?"}).text
@@ -179,14 +178,21 @@ def test_asking_and_pointing_are_decided_without_the_model(monkeypatch):
     assert model.asked == []
 
 
-def test_without_the_model_the_keywords_decide_in_both_languages(monkeypatch):
+def test_without_the_model_only_asking_searches(monkeypatch):
+    """No topic word list (they needed one word per topic, in two languages): with the model
+    down, a question is searched only when the person asks for it."""
     def down(*a, **k):
         raise requests.ConnectionError("refused")
 
     monkeypatch.setattr(sc.requests, "post", down)
-    assert sc.wants_search("¿Quién ganó el partido?", classifier_url="http://vlm")
-    assert sc.wants_search("Who won the match?", classifier_url="http://vlm")
-    assert not sc.wants_search("¿Cómo te llamás?", classifier_url="http://vlm")
+    assert not sc.wants_search("¿Quién ganó el partido?", classifier_url="http://vlm")
+    assert not sc.wants_search("Who won the match?", classifier_url="http://vlm")
+    assert sc.wants_search("buscá quién ganó el partido", classifier_url="http://vlm")
+    assert sc.wants_search("search who won the match", classifier_url="http://vlm")
+
+
+def test_there_is_no_topic_word_list():
+    assert not hasattr(sc, "TOPICS") and not hasattr(sc, "WHEN")
 
 
 def test_a_web_question_goes_without_the_frame(monkeypatch):
@@ -272,7 +278,7 @@ def test_the_stream_searches_the_previous_question(monkeypatch):
 def test_after_a_search_the_model_is_told_it_did_search(asked):
     """Catches: "no puedo realizar búsquedas en Internet" over the results, copied from its own
     earlier answer in the history."""
-    assert "never say you cannot search" in sc.search_fact("¿Cuánto está el dólar hoy?")
+    assert "never say you cannot search" in sc.search_fact("¿Cuánto está el dólar hoy?", decided=True)
 
 
 def test_without_a_search_the_model_offers_one():
