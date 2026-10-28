@@ -178,6 +178,42 @@ def test_while_the_robot_speaks_the_ear_is_deaf():
     assert heard == []
 
 
+def test_saying_the_name_cuts_the_robot_off():
+    """Catches: no way to stop a long answer — the ear was deaf while the robot talked."""
+    clock = Clock()
+    ear, heard = ear_saying("la mesa es marrón y la silla es Bender", clock=clock)
+    ear.mute(True, barge=True)
+    events = feed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.2))
+    assert heard and events[-1] == {"type": "barge", "text": ""}
+    ear.mute(False)
+    clock.t += ec.UNMUTE_GUARD_S + 0.1
+    ear.transcribe = lambda wav: "¿y la de la izquierda?"
+    events = feed(ear, tone(1.0, 0.08) + noise(1.2))
+    assert events[-1] == {"type": "command", "text": "¿y la de la izquierda?"}, "the ¿Sí? window opened"
+
+
+def test_a_question_said_over_the_robot_is_answered_next():
+    ear, _ = ear_saying("la mesa es marrón. Bender, ¿qué hora es?")
+    ear.mute(True, barge=True)
+    events = feed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.2))
+    assert events[-1] == {"type": "barge", "text": "qué hora es"}
+
+
+def test_while_talking_only_the_name_counts():
+    """The robot's own words, heard through its mic, are never a question."""
+    ear, heard = ear_saying("la mesa es marrón y la silla es gris")
+    ear.mute(True, barge=True)
+    events = feed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.2))
+    assert heard and events == []
+
+
+def test_a_repeated_name_is_not_the_question():
+    """Catches: "Bender, Bender" asked "Bender" (2026-10-28)."""
+    assert ec.wake_command("Bender, Bender") == (True, "")
+    assert ec.wake_command("Bender bender, ¿qué ves?") == (True, "qué ves")
+    assert ec.last_wake_command("Bender, Bender.") == (True, "")
+
+
 def test_wake_command_parsing():
     assert ec.wake_command("Bender, ¿qué ves?") == (True, "qué ves")
     assert ec.wake_command("hola Bénder") == (True, "")

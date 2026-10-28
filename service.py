@@ -603,7 +603,8 @@ async def ear(ws: WebSocket):
     """The robot's ear (src/ear_common.py): the backend sends the robot's microphone as binary
     frames of 16 kHz mono s16le, and gets back one JSON event per thing heard — the browser's
     voice assistant answers the "command" ones. A text frame {"type": "mute", "on": true}
-    makes it deaf while the robot itself is speaking, so it does not answer its own voice."""
+    makes it deaf while the robot itself is speaking, so it does not answer its own voice;
+    with "barge": true it still hears its name, to be interrupted ("barge" events)."""
     await ws.accept()
 
     def transcribe(wav):
@@ -625,6 +626,6 @@ async def ear(ws: WebSocket):
                 except ValueError:
                     continue
                 if isinstance(control, dict) and control.get("type") == "mute":
-                    listener.mute(bool(control.get("on")))
+                    listener.mute(bool(control.get("on")), barge=bool(control.get("barge")))
     except WebSocketDisconnect:
         pass

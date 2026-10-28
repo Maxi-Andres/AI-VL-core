@@ -16,7 +16,10 @@ the voice assistant needs, Alexa-style:
      own VAD, asr_common) and looks for the wake word. "Bender, qué ves" is a command at once;
      "Bender" alone waits up to FOLLOW_UP_S for the next utterance. Text that Whisper is
      known to invent from noise is dropped. While the robot itself speaks, the ear is MUTED
-     (it would otherwise hear and answer itself), plus UNMUTE_GUARD_S after.
+     (it would otherwise hear and answer itself), plus UNMUTE_GUARD_S after — except for its
+     name: muted with `barge`, it still listens, and "Bender" alone or "Bender, …" interrupts
+     the answer (a "barge" event). The page turns `barge` off for an answer that says "Bender"
+     itself, or the robot would cut itself off.
 
 Pure logic with an injected transcriber and clock, so tests/test_ear.py drives it with
 made-up audio.
@@ -130,12 +133,33 @@ class Segmenter:
         return None
 
 
+_PUNCT = " ,.;:!¡?¿-…"
+
+
+def _after(text, end):
+    """What follows a wake word, without the punctuation and any repeat of the name: "Bender,
+    Bender" asked "Bender" as a question (2026-10-28)."""
+    rest = text[end:].strip(_PUNCT)
+    while (m := WAKE.match(rest)):
+        rest = rest[m.end():].strip(_PUNCT)
+    return rest.strip()
+
+
 def wake_command(text):
     """(woke, command) for an utterance: is "Bender" in it, and what comes after it."""
     m = WAKE.search(text or "")
     if not m:
         return False, ""
-    return True, text[m.end():].strip(" ,.;:!¡?¿-…").strip()
+    return True, _after(text, m.end())
+
+
+def last_wake_command(text):
+    """Like wake_command, after the LAST "Bender": heard while the robot talks, the utterance
+    starts with the robot's own words ("…la mesa es marrón. Bender, ¿y la silla?")."""
+    found = list(WAKE.finditer(text or ""))
+    if not found:
+        return False, ""
+    return True, _after(text, found[-1].end())
 
 
 class Ear:
@@ -145,6 +169,8 @@ class Ear:
       {"type": "heard", "text": ...}       what one utterance said (also when ignored)
       {"type": "wake"}                     "Bender" alone: say "¿Sí?", the next one is the command
       {"type": "command", "text": ...}     the request to answer
+      {"type": "barge", "text": ...}       "Bender" while the robot talks: stop talking, then
+                                           answer `text`, or with "" say "¿Sí?" as for a wake
     """
 
     def __init__(self, transcribe, clock=time.monotonic):
@@ -152,10 +178,13 @@ class Ear:
         self.clock = clock
         self.seg = Segmenter()
         self.muted = False
+        self.barge = False
         self.unmuted_at = 0.0
         self.awaiting_until = 0.0
 
-    def mute(self, on):
+    def mute(self, on, barge=False):
+        """`on` while the robot talks; `barge`: still listen for its name, to interrupt."""
+        self.barge = bool(on and barge)
         if on and not self.muted:
             self.muted = True
             self.seg.reset()
@@ -164,15 +193,30 @@ class Ear:
             self.unmuted_at = self.clock()
 
     def feed(self, pcm):
-        if self.muted or self.clock() - self.unmuted_at < UNMUTE_GUARD_S:
+        if self.muted and not self.barge:
+            return []
+        if not self.muted and self.clock() - self.unmuted_at < UNMUTE_GUARD_S:
             return []
         events = []
         for utterance in self.seg.push(pcm):
-            events += self.hear(utterance)
+            events += self.barge_in(utterance) if self.muted else self.hear(utterance)
         if self.seg.started:
             self.seg.started = False
-            events.insert(0, {"type": "speech"})
+            if not self.muted:                # not the robot's own voice as "someone talks"
+                events.insert(0, {"type": "speech"})
         return events
+
+    def barge_in(self, pcm):
+        """An utterance heard while the robot talks: only its name counts (the rest is mostly
+        the robot's own voice)."""
+        text = (self.transcribe(pcm_to_wav(pcm)) or "").strip()
+        if not text or HALLUCINATIONS.search(text):
+            return []
+        woke, command = last_wake_command(text)
+        if not woke:
+            return []
+        self.awaiting_until = 0.0 if command else self.clock() + FOLLOW_UP_S
+        return [{"type": "heard", "text": text}, {"type": "barge", "text": command}]
 
     def hear(self, pcm):
         text = (self.transcribe(pcm_to_wav(pcm)) or "").strip()
