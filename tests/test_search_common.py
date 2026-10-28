@@ -202,7 +202,7 @@ def test_a_web_question_goes_without_the_frame(monkeypatch):
     monkeypatch.setattr(vc, "vlm_backend", lambda: "llamacpp")
     monkeypatch.setattr(vc, "model_supports_thinking", lambda *a, **k: False)
     monkeypatch.setattr(vc, "_openai_chunks", lambda payload, url, t: sent.append(payload) or iter(()))
-    monkeypatch.setattr(sc, "search_fact", lambda q, url=None, decided=None, earlier=(): "results" if decided else "")
+    monkeypatch.setattr(sc, "search_fact", lambda q, url=None, decided=None, **k: "results" if decided else "")
     list(vc.query_vlm_stream("aGk=", "m", "quién ganó en Brasil", search=True))
     list(vc.query_vlm_stream("aGk=", "m", "buscá en internet qué es esto", search=True))
     list(vc.query_vlm_stream("aGk=", "m", "¿qué ves?", search=False))
@@ -247,7 +247,8 @@ def test_the_that_after_search_is_the_question_not_the_picture(question):
 
 @pytest.mark.parametrize("question", ["buscá qué marca es esto", "search what brand this is"])
 def test_a_that_inside_the_question_is_still_the_picture(question):
-    assert not sc.wants_search(question)
+    """It points at something in view: searched with the frame, its query written from it."""
+    assert sc.wants_search(question) == "both"
 
 
 @pytest.mark.parametrize("follow_up, earlier, query", [
@@ -285,3 +286,64 @@ def test_without_a_search_the_model_offers_one():
     assert "ask you to search the internet" in vc.free_prompt_system(question="¿Quién ganó?", search=False)
     assert "search" not in vc.free_prompt_system(question="¿Qué dice el cartel?", search=False), \
         "reading prompts stay as measured"
+
+
+class _Chat:
+    """llama-server's chat answer, and what it was sent."""
+    def __init__(self, text, sent):
+        self.text, self.sent = text, sent
+
+    def __call__(self, url, timeout=None, json=None):
+        self.sent.append(json)
+        return self
+
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"choices": [{"message": {"content": self.text}}]}
+
+
+@pytest.mark.parametrize("question, kind", [
+    ("¿Cuánto cuesta este multímetro?", "both"), ("How much does this multimeter cost?", "both"),
+    ("¿Qué horario tiene ese castillo?", "both"), ("Where can I buy one of these?", "both"),
+    ("¿Cuánto cuesta un Fluke 87?", "web"), ("¿A cuánto esta el dolar?", "web"),
+    ("Did SpaceX launch anything this week?", "web"),
+    ("¿Qué dice el cartel?", False), ("What do you see?", False),
+])
+def test_what_the_question_points_at_decides_the_kind(monkeypatch, question, kind):
+    """Catches: "¿cuánto cuesta este multímetro?" searched as "multímetro" without the frame,
+    or not searched at all (2026-10-28). The model only says whether the web is needed."""
+    monkeypatch.setattr(sc, "model_says_web", lambda q, url: True)
+    assert sc.wants_search(question, classifier_url="http://vlm") == kind
+
+
+def test_a_question_about_something_in_view_searches_what_the_frame_shows(asked, monkeypatch):
+    sent = []
+    monkeypatch.setattr(sc.requests, "post", _Chat("precio multímetro Fluke 87", sent))
+    fact = sc.search_fact("¿Cuánto cuesta este multímetro?", decided="both", image="aGk=",
+                          vlm_url="http://vlm")
+    assert asked == ["precio multimetro fluke 87"]
+    assert sent[0]["messages"][0]["content"][0]["image_url"]["url"].endswith("aGk="), "it looked"
+    assert "about what is in the image" in fact and "do not mention the image" not in fact
+
+
+def test_the_model_s_filler_is_dropped_from_the_query(asked, monkeypatch):
+    monkeypatch.setattr(sc.requests, "post", _Chat("Horario de visita del castillo mostrado en la imagen", []))
+    sc.search_fact("¿Qué horario tiene este castillo?", decided="both", image="aGk=", vlm_url="http://vlm")
+    assert asked == ["horario de visita del castillo"]
+
+
+@pytest.mark.parametrize("question", ["Did SpaceX launch anything this week?",
+                                      "¿Quién ganó este fin de semana?", "¿Qué pasó este año?"])
+def test_this_week_is_a_time_not_something_in_view(question):
+    assert not sc.points_in_view(question)
+
+
+def test_without_the_model_the_question_itself_is_searched(asked, monkeypatch):
+    def down(*a, **k):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(sc.requests, "post", down)
+    sc.search_fact("¿Cuánto cuesta este multímetro?", decided="both", image="aGk=", vlm_url="http://vlm")
+    assert asked == ["cuanto cuesta este multimetro"]

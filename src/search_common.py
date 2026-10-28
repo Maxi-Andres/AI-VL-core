@@ -9,7 +9,7 @@ does (vlm_common.persona_for): only when the question asks for it.
 
 Whether to search (wants_search), in this order:
   1. the person asks for it — "buscá", "en internet", "search", "look up": yes;
-  2. the question is about what is in view — "el cartel", "la pantalla", "esto": no;
+  2. the question names the picture — "el cartel", "la pantalla", "what do you see": no;
   3. otherwise the model decides, from the question alone, without the image (model_says_web).
      Measured 2026-10-28 on 42 questions (image, the robot itself, general knowledge, and
      news / sports / prices / weather / schedules / office holders): 41 right, ~27 ms each on
@@ -17,6 +17,12 @@ Whether to search (wants_search), in this order:
   4. no model to ask (Ollama backend, server down): no — only an explicit ask (step 1)
      searches. There is deliberately no topic list: every topic would need its own words, in
      two languages (dropped 2026-10-28).
+A search is "web" (the question names what it asks about: the frame does not go) or "both"
+(it points at something in view — "¿cuánto cuesta ESTE multímetro?", "the opening hours of
+THIS castle"): then the model looks at the frame and writes the query itself ("Fluke 87
+precio"), and the answer gets the frame and the results (identify_query). What points is
+grammar, not topic: the demonstratives, a closed class in each language. The 4B could not tell
+the two apart from the text (14 of 14 "this X" questions read as plain web, 2026-10-28).
 Plan: .claude/roadmap/PLATAFORMA.md, "Bender útil" §1.
 """
 
@@ -53,12 +59,21 @@ TIMEOUT_S = 6.0
 NAMES_THE_WEB = ["internet", "en la web", "en google", "googlea", "en linea", "online",
                  "on the web", "web search", "google it"]
 ASKS_TO_SEARCH = ["busc", "averigu", "search", "look up", "look it up", "find out"]
-# 2. About what is in view — whole words only ("esa" is not "esas", "eso" is not "esos").
-#    Except right after a search verb: there "eso" is what was just asked ("¿qué partidos hay
-#    hoy?, buscá eso" was read as "that thing in the picture" and not searched, 2026-10-28).
-ABOUT_THE_IMAGE = ["imagen", "foto", "camara", "pantalla", "cartel", "letrero", "frente", "ves",
-                   "veo", "esto", "eso", "esa", "ese", "aca", "ahi", "image", "picture", "photo",
-                   "camera", "screen", "sign", "this", "see"]
+# 2. Names the picture — whole words only. Never searched.
+NAMES_THE_IMAGE = ["imagen", "foto", "camara", "pantalla", "cartel", "letrero", "frente", "ves",
+                   "veo", "image", "picture", "photo", "camera", "screen", "sign", "see"]
+# Points at something in view: the demonstratives (and "here / there"). Whole words ("esa" is
+# not "esas"). Not "esta": without accents it is also "está" ("¿a cuánto está el dólar?").
+# Right after a search verb they point at the question instead ("¿qué partidos hay hoy?, buscá
+# eso" was not searched, 2026-10-28) — _unpointed.
+POINTS = ["esto", "eso", "este", "ese", "esa", "estos", "estas", "esos", "esas", "aca", "ahi",
+          "this", "these", "those"]
+# ...but not before a span of time ("this week", "este año": "Did SpaceX launch anything this
+# week?" was read as pointing at the view, 2026-10-28). Units of time, also a closed class.
+_A_TIME = re.compile(r"\b(este|ese|esta|this|these|those)\s+(fin de semana|finde|semana|mes|ano|anos|"
+                     r"dia|dias|momento|lunes|martes|miercoles|jueves|viernes|sabado|domingo|"
+                     r"week|weekend|month|year|years|day|days|morning|afternoon|evening|season|"
+                     r"monday|tuesday|wednesday|thursday|friday|saturday|sunday|time)\b")
 # What the model is told, for step 3 (wording measured, see the module docstring).
 CLASSIFIER = (
     "The person is looking at a live camera image and asking a robot assistant. Decide if their "
@@ -134,9 +149,17 @@ def _unpointed(plain):
     return _POINTER.sub(r"\1\6", plain)
 
 
+def names_the_image(question):
+    return _has_word(_unpointed(_plain(question)), NAMES_THE_IMAGE)
+
+
+def points_in_view(question):
+    return _has_word(_A_TIME.sub(" ", _unpointed(_plain(question))), POINTS)
+
+
 def about_the_image(question):
-    """The question points at what is in view ("el cartel", "esto", "what do you see")."""
-    return _has_word(_unpointed(_plain(question)), ABOUT_THE_IMAGE)
+    """The question is about what is in view ("el cartel", "esto", "what do you see")."""
+    return names_the_image(question) or points_in_view(question)
 
 
 def model_says_web(question, url, timeout=CLASSIFIER_TIMEOUT_S):
@@ -155,21 +178,55 @@ def model_says_web(question, url, timeout=CLASSIFIER_TIMEOUT_S):
 
 
 def wants_search(question, classifier_url=None):
-    """True when the question needs the web (the order is in the module docstring).
+    """False, "web" or "both" (the order and the kinds are in the module docstring).
     `classifier_url`: the llama-server to ask in step 3; without it, only an explicit ask."""
     q = _plain(question)
     if not q:
         return False
+    kind = "both" if points_in_view(question) else "web"
     if _has(q, NAMES_THE_WEB):
-        return True
-    image = about_the_image(question)
-    if _has(q, ASKS_TO_SEARCH):
-        return not image
-    if image:
+        return "both" if about_the_image(question) else "web"
+    if names_the_image(question):
         return False
-    if classifier_url:
-        return bool(model_says_web(question, classifier_url))
+    if _has(q, ASKS_TO_SEARCH):
+        return kind
+    if classifier_url and model_says_web(question, classifier_url):
+        return kind
     return False
+
+
+# Measured 2026-10-28 on 12 questions: an option "write NONE if the image answers it" made the
+# 4B skip the search on most price / hours / reviews questions — whether to search is the text
+# classifier's call, this only writes the query.
+IDENTIFY = (
+    "Write the web search query for the question below about this image. Name what it points "
+    "at by what the image shows: the brand, model or name written on it, or which place, "
+    "building or object it is — never words like 'in the image' or 'this'. Add what is asked. "
+    "In the question's language, at most 12 words. Only the query.")
+IDENTIFY_TIMEOUT_S = 6.0
+# What the 4B still adds now and then ("Horario del castillo mostrado en la imagen").
+_IN_THE_IMAGE = re.compile(r"\b((mostrad[oa]|que (se )?ve) )?(en|de) (la|esta) (imagen|foto)\b|"
+                           r"\b(shown )?in (the|this) (image|picture|photo)\b|\bquery\b",
+                           re.IGNORECASE)
+
+
+def identify_query(question, image_b64, url, model="default", timeout=IDENTIFY_TIMEOUT_S):
+    """The query for a question that points at something in view, written by the VLM looking at
+    the frame ("¿cuánto cuesta este multímetro?" -> "precio multímetro Fluke 87"); None when
+    the model could not be asked."""
+    try:
+        r = requests.post(f"{url.rstrip('/')}/v1/chat/completions", timeout=timeout, json={
+            "model": model, "temperature": 0, "max_tokens": 32,
+            "messages": [{"role": "user", "content": [
+                {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_b64}},
+                {"type": "text", "text": f"{IDENTIFY}\n\nQuestion: {question}"}]}]})
+        r.raise_for_status()
+        answer = r.json()["choices"][0]["message"]["content"]
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
+        return None
+    lines = answer.strip().splitlines()
+    query = search_query(_IN_THE_IMAGE.sub(" ", lines[0] if lines else "")).strip(' :"')
+    return query[:150] or None
 
 
 def _topic(question):
@@ -291,15 +348,23 @@ def search(query, url=SEARXNG_URL, timeout=TIMEOUT_S, figure=False):
     return out[:MAX_RESULTS]
 
 
-def search_fact(question, url=SEARXNG_URL, decided=None, earlier=()):
+def search_fact(question, url=SEARXNG_URL, decided=None, earlier=(), image=None, vlm_url=None,
+                model="default"):
     """What goes to the model for this question: "" when it asks for no search; the results
     with their sources when it does; a plain "the search failed" when it could not be done, so
     the model says so instead of inventing an answer. `decided`: wants_search's answer when the
     caller already has it (the service asks once, to say "searching" first). `earlier`: the
-    previous questions, for a follow-up like "buscalo" (search_query)."""
-    if not (wants_search(question) if decided is None else decided):
+    previous questions, for a follow-up like "buscalo" (search_query). `image` and `vlm_url`: the
+    frame and the VLM server, for a question that points at something in view ("both")."""
+    kind = wants_search(question) if decided is None else decided
+    if not kind:
         return ""
-    query = search_query(question, earlier)
+    query = None
+    if kind == "both" and image and vlm_url:
+        t0 = time.monotonic()
+        query = identify_query(question, image, vlm_url, model=model)
+        print(f"[search] identified {query!r} in {time.monotonic() - t0:.1f}s", flush=True)
+    query = query or search_query(question, earlier)
     t0 = time.monotonic()
     try:
         results = search(query, url=url, figure=_has(_plain(question), FIGURE))
@@ -326,9 +391,14 @@ def search_fact(question, url=SEARXNG_URL, decided=None, earlier=()):
     today = datetime.date.today().isoformat()
     # "You searched": with the earlier "I have no internet access" in the history, the model
     # repeated it over the results (2026-10-28).
-    return (f"Today is {today}. This question is about the web, not about the image: do not "
-            "mention the image. You searched the internet for it just now, so never say you "
-            "cannot search or browse. Results of that search: " + " ".join(lines) +
+    if kind == "both":
+        about = (f"This question is about what is in the image; you searched the internet for "
+                 f"\"{query}\" just now, so never say you cannot search or browse. Results: ")
+    else:
+        about = ("This question is about the web, not about the image: do not mention the "
+                 "image. You searched the internet for it just now, so never say you cannot "
+                 "search or browse. Results of that search: ")
+    return (f"Today is {today}. " + about + " ".join(lines) +
             " Answer in two or three sentences with the fact or figure asked and the name of "
             "the site it comes from (the site, never a number like [4]); if the results do not "
             "answer it, say so.")

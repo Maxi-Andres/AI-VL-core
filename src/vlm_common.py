@@ -893,14 +893,18 @@ NOT_SEARCHED = ("If the question needs current information you do not have (news
                 "internet for it.")
 
 
-def free_prompt_system(robot=None, question=None, search=None, earlier=()):
+def free_prompt_system(robot=None, question=None, search=None, earlier=(), image=None,
+                       vlm_url=None, model="default"):
     persona = persona_for(robot, question=question)
     system = f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
     # Web results, only when the question needs the web (search_common decides, or the caller
-    # already did: `search`). `earlier`: the previous questions, for a "buscalo" follow-up.
+    # already did: `search`). `earlier`: the previous questions, for a "buscalo" follow-up;
+    # `image`, `vlm_url`, `model`: for a question about something in view, whose query the model
+    # writes looking at the frame.
     # Not on a question about the picture: reading prompts stay as they were measured.
     from search_common import about_the_image, search_fact
-    found = search_fact(question, decided=search, earlier=earlier)
+    found = search_fact(question, decided=search, earlier=earlier, image=image, vlm_url=vlm_url,
+                        model=model)
     if found:
         return f"{system} {found}"
     return f"{system} {NOT_SEARCHED}" if question and not about_the_image(question) else system
@@ -1045,7 +1049,8 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     if search is None:
         search = wants_search(prompt)
     asked_before = [t.get("question") or "" for t in history or []]
-    system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before)
+    system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before,
+                                    image=img_b64, vlm_url=url, model=model)
     question = {"role": "user", "content": prompt}
     if not search or about_the_image(prompt):
         question["images"] = [img_b64]
