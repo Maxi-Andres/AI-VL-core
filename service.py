@@ -635,6 +635,8 @@ async def ear(ws: WebSocket):
     def transcribe(wav):
         return asr_common.transcribe(wav, language="es")["text"]
 
+    if folder := os.environ.get("EAR_RECORD_DIR"):
+        transcribe = ear_common.recording(transcribe, folder)
     listener = ear_common.Ear(transcribe)
     try:
         while True:

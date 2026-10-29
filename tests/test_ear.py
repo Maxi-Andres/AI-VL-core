@@ -238,3 +238,14 @@ def test_wake_command_parsing():
     assert ec.wake_command("Bender, ¿qué ves?") == (True, "qué ves")
     assert ec.wake_command("hola Bénder") == (True, "")
     assert ec.wake_command("vender la casa") == (False, "")
+
+
+def test_recording_keeps_each_utterance_and_what_was_heard(tmp_path):
+    # To measure the ear on real voices, the audio and the text must both be there, paired.
+    import json
+    heard = ec.recording(lambda wav: "Bender, qué ves", tmp_path / "ear", clock=lambda: 1761700000.25)
+    wav = ec.pcm_to_wav(tone(1.0, 0.08))
+    assert heard(wav) == "Bender, qué ves"
+    line = json.loads((tmp_path / "ear" / "heard.jsonl").read_text(encoding="utf-8"))
+    assert line["text"] == "Bender, qué ves" and line["seconds"] == 1.0
+    assert (tmp_path / "ear" / line["wav"]).read_bytes() == wav

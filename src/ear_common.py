@@ -75,6 +75,30 @@ def pcm_to_wav(pcm, rate=RATE):
             + b"data" + struct.pack("<I", len(data)) + data)
 
 
+def recording(transcribe, folder, clock=time.time):
+    """`transcribe`, keeping each utterance it is given as a WAV in `folder` and what it heard
+    in `folder`/heard.jsonl ({"wav", "at", "seconds", "text"}). To measure the ear on real
+    voices — which model hears them best, and whether END_SILENCE_MS cuts a sentence in two
+    ("Acordate de que yo llevo" came in alone, 2026-10-28) — off unless EAR_RECORD_DIR is set:
+    it records the room."""
+    import json
+    import os
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+
+    def heard(wav):
+        at = clock()
+        name = time.strftime("%Y%m%d-%H%M%S", time.localtime(at)) + f"-{int(at * 1000) % 1000:03d}.wav"
+        with open(os.path.join(folder, name), "wb") as f:
+            f.write(wav)
+        text = transcribe(wav)
+        with open(os.path.join(folder, "heard.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"wav": name, "at": round(at, 3),
+                                "seconds": round((len(wav) - 44) / (2 * RATE), 2),
+                                "text": text or ""}, ensure_ascii=False) + "\n")
+        return text
+    return heard
+
+
 class Segmenter:
     """Cuts a PCM stream into utterances. push() returns the utterances it completed."""
 
