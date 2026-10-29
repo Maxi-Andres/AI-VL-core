@@ -478,19 +478,25 @@ async def transcribe(
 
 class KeepRequest(BaseModel):
     text: str = Field("", max_length=4000)
+    image: str = ""          # the frame the message was said over; read only for "seen"
 
 
 @app.post("/keep")
 async def keep(req: KeepRequest):
-    """Does this message ask the robot to keep a picture or a note (keep_common)? The gateway
-    stores it; this only reads the words. `decided` is false when the VLM server could not be
-    asked — the gateway then falls back on its own patterns."""
+    """Does this message ask the robot to keep something (keep_common)? The gateway stores it;
+    this reads the words — and, for "seen" ("acordate de la medida"), the fact off the frame,
+    which then goes as `note`. `decided` is false when the VLM server could not be asked — the
+    gateway then falls back on its own patterns."""
     if vlm_common.vlm_backend() != "llamacpp" or not req.text.strip():
         return {"decided": False, "keep": None, "note": ""}
     said = await run_in_threadpool(keep_common.wants_kept, req.text, vlm_url())
     if said is None:
         return {"decided": False, "keep": None, "note": ""}
-    return {"decided": True, "keep": said[0], "note": said[1]}
+    kind, note = said
+    if kind == "seen" and req.image:
+        note = await run_in_threadpool(keep_common.seen_fact, req.text, note, req.image,
+                                       vlm_url()) or note
+    return {"decided": True, "keep": kind, "note": note}
 
 
 @app.post("/vlm/stream")
