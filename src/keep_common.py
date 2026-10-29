@@ -18,6 +18,12 @@ Five answers, because a request to remember is not always a fact in words (2026-
   NO             anything else
 Questions go to the model too: Whisper puts question marks on orders ("¿Sacá esta foto?"), and
 the gateway's rule "a question is never a request" dropped that one.
+
+Measured 2026-10-29 on 65 messages none of the examples (the 43 from 2026-10-28 plus orders with
+Whisper's question marks, "seen", cut-off requests and questions about the memory): 64 right,
+~43 ms each; the miss is "Lo guardamos por todo este control" (Whisper's garble of "guardá una
+foto de este control"). seen_fact on a real frame: ~0.2 s, and "No se muestra ninguna medida en
+la imagen" when what it points at is not there.
 """
 import requests
 
