@@ -14,7 +14,8 @@ the voice assistant needs, Alexa-style:
      END_SILENCE_MS of silence or at MAX_S, and is dropped with under MIN_VOICED_S of voice.
   2. EAR — sends each utterance to speech-to-text (Whisper with the "Bender" hotword and its
      own VAD, asr_common) and looks for the wake word. "Bender, qué ves" is a command at once;
-     "Bender" alone waits up to FOLLOW_UP_S for the next utterance. Text that Whisper is
+     "Bender" alone waits up to FOLLOW_UP_S for the next utterance. A request that stops
+     mid-sentence (`cut`, turn_common) is held HOLD_S for the rest, and heard again as one. Text that Whisper is
      known to invent from noise is dropped. While the robot itself speaks, the ear is MUTED
      (it would otherwise hear and answer itself), plus UNMUTE_GUARD_S after — except for its
      name: muted with `barge`, it still listens, and "Bender" alone or "Bender, …" interrupts
@@ -42,6 +43,10 @@ MAX_S = 8.0
 MIN_VOICED_S = 0.2                # less voice than this is a click, not a word ("sí" is ~0.25)
 FOLLOW_UP_S = 8.0
 UNMUTE_GUARD_S = 0.4
+# A request that stops mid-sentence ("Bender, acordate de que yo llevo…" — a pause to think closes
+# the utterance) is held this long after it ended for the rest to arrive; then it goes as is.
+HOLD_S = 2.0
+HOLD_GAP_S = 0.3                  # silence put between the two halves when they are heard again
 
 WAKE = re.compile(r"\bb[eé]nd[eé]r\b", re.IGNORECASE)
 # The page answers a bare "Bender" with a spoken "¿Sí?" and does NOT mute the ear for it — muting
@@ -197,14 +202,16 @@ class Ear:
                                            answer `text`, or with "" say "¿Sí?" as for a wake
     """
 
-    def __init__(self, transcribe, clock=time.monotonic):
+    def __init__(self, transcribe, clock=time.monotonic, cut=lambda text: False):
         self.transcribe = transcribe          # wav bytes -> text
         self.clock = clock
+        self.cut = cut                        # text -> stopped mid-sentence? (turn_common)
         self.seg = Segmenter()
         self.muted = False
         self.barge = False
         self.unmuted_at = 0.0
         self.awaiting_until = 0.0
+        self.held = None                      # a request cut off mid-sentence: {pcm, until, ...}
 
     def mute(self, on, barge=False):
         """`on` while the robot talks; `barge`: still listen for its name, to interrupt."""
@@ -224,6 +231,10 @@ class Ear:
         events = []
         for utterance in self.seg.push(pcm):
             events += self.barge_in(utterance) if self.muted else self.hear(utterance)
+        if self.held and self.clock() > self.held["until"] and self.seg.utterance is None:
+            # Nothing more came: the request goes as it was said.
+            events.append({"type": "command", "text": self.held["request"]})
+            self.held = None
         if self.seg.started:
             self.seg.started = False
             if not self.muted:                # not the robot's own voice as "someone talks"
@@ -248,20 +259,33 @@ class Ear:
         # pause, ~4 s of speech, the closing silence, the transcription) fell outside the 8 s
         # and was heard but not answered (2026-10-28).
         began = self.clock() - len(pcm) / (2 * RATE)
+        held, self.held = self.held, None
+        late = []
+        if held and began < held["until"]:
+            # The rest of a request cut off mid-sentence: heard again as one, so Whisper has
+            # the whole sentence ("…yo llevo" + "la notebook a la reunión").
+            pcm = held["pcm"] + bytes(int(HOLD_GAP_S * RATE) * 2) + pcm
+        elif held:                            # started after the wait: that one goes as it was
+            late, held = [{"type": "command", "text": held["request"]}], None
         text = (self.transcribe(pcm_to_wav(pcm)) or "").strip()
         if not text or HALLUCINATIONS.search(text):
-            return []
-        events = [{"type": "heard", "text": text}]
+            return [{"type": "command", "text": held["request"]}] if held else late
+        events = [*late, {"type": "heard", "text": text}]
         woke, command = wake_command(text)
+        request = ""
         if woke and command:
-            self.awaiting_until = 0.0
-            events.append({"type": "command", "text": command})
+            request = command
         elif woke:
             self.awaiting_until = self.clock() + FOLLOW_UP_S
             events.append({"type": "wake"})
-        elif began < self.awaiting_until:
-            request = ACK_ECHO.sub("", text).strip()
-            if request:                       # a bare "sí" is the robot's own ack: keep waiting
-                self.awaiting_until = 0.0
+        elif began < self.awaiting_until or held:
+            request = ACK_ECHO.sub("", text).strip()   # a bare "sí" is the robot's own ack
+        if request:
+            self.awaiting_until = 0.0
+            # Asked on the words as heard: the request has lost its closing "?" (_after).
+            if not held and self.cut(text):
+                # Once: a second pause gets what was said so far, not another wait.
+                self.held = {"pcm": pcm, "request": request, "until": self.clock() + HOLD_S}
+            else:
                 events.append({"type": "command", "text": request})
         return events

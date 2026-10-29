@@ -249,3 +249,65 @@ def test_recording_keeps_each_utterance_and_what_was_heard(tmp_path):
     line = json.loads((tmp_path / "ear" / "heard.jsonl").read_text(encoding="utf-8"))
     assert line["text"] == "Bender, qué ves" and line["seconds"] == 1.0
     assert (tmp_path / "ear" / line["wav"]).read_bytes() == wav
+
+
+# --------------------------------------------------------------------------- #
+# A pause to think inside a sentence
+def cut_ear(*texts, clock):
+    """An ear whose `cut` says a request ending in "que" or "llevo" stopped mid-sentence."""
+    said = iter(texts)
+    heard = []
+
+    def transcribe(wav):
+        heard.append(len(wav))
+        return next(said, "")
+    return ec.Ear(transcribe, clock=clock, cut=lambda t: t.endswith(("que", "llevo"))), heard
+
+
+def test_a_sentence_cut_by_a_pause_is_heard_whole():
+    """Catches: "Bender, acordate de que yo llevo" closed by a pause to think, and kept as the
+    note "yo llevo" (2026-10-28)."""
+    clock = Clock()
+    ear, heard = cut_ear("Bender, acordate de que yo llevo",
+                         "Bender, acordate de que yo llevo la notebook a la reunión", clock=clock)
+    first = feed_timed(ear, noise(1.0) + tone(2.0, 0.08) + noise(1.0), clock)
+    assert "command" not in [e["type"] for e in first], "held, not sent"
+    rest = feed_timed(ear, tone(1.5, 0.08) + noise(1.2), clock)
+    assert rest[-1] == {"type": "command", "text": "acordate de que yo llevo la notebook a la reunión"}
+    assert heard[1] > heard[0] + ec.HOLD_GAP_S * ec.RATE * 2, "both halves transcribed together"
+
+
+def test_a_cut_request_that_never_goes_on_is_sent_as_it_was():
+    clock = Clock()
+    ear, _ = cut_ear("Bender, acordate de que", clock=clock)
+    first = feed_timed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.0), clock)
+    assert "command" not in [e["type"] for e in first]
+    later = feed_timed(ear, noise(ec.HOLD_S + 0.5), clock)
+    assert later == [{"type": "command", "text": "acordate de que"}]
+
+
+def test_talk_after_the_wait_does_not_lose_the_held_request():
+    clock = Clock()
+    ear, _ = cut_ear("Bender, acordate de que", "y después fuimos a comer", clock=clock)
+    feed_timed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.0), clock)
+    clock.t += ec.HOLD_S + 1.0                # silence the ear did not get packets for
+    later = feed_timed(ear, tone(1.5, 0.08) + noise(1.2), clock)
+    commands = [e for e in later if e["type"] == "command"]
+    assert commands == [{"type": "command", "text": "acordate de que"}], "the late talk is not a request"
+
+
+def test_a_finished_request_does_not_wait():
+    clock = Clock()
+    asked = []
+    ear = ec.Ear(lambda wav: "Bender, ¿qué ves?", clock=clock, cut=lambda t: asked.append(t) or False)
+    events = feed_timed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2), clock)
+    assert events[-1] == {"type": "command", "text": "qué ves"}
+    assert asked == ["Bender, ¿qué ves?"], "judged on the words as heard, closing mark and all"
+
+
+def test_a_second_pause_sends_what_was_said_so_far():
+    clock = Clock()
+    ear, _ = cut_ear("Bender, acordate de que", "Bender, acordate de que yo llevo", clock=clock)
+    feed_timed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.0), clock)
+    rest = feed_timed(ear, tone(1.0, 0.08) + noise(1.2), clock)
+    assert rest[-1] == {"type": "command", "text": "acordate de que yo llevo"}

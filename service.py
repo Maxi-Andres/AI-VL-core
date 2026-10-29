@@ -64,6 +64,7 @@ import ear_common
 import keep_common
 import search_common
 import tts_common
+import turn_common
 import vlm_common
 import yolo_common
 
@@ -643,7 +644,10 @@ async def ear(ws: WebSocket):
 
     if folder := os.environ.get("EAR_RECORD_DIR"):
         transcribe = ear_common.recording(transcribe, folder)
-    listener = ear_common.Ear(transcribe)
+    def cut(text):
+        return vlm_common.vlm_backend() == "llamacpp" and turn_common.looks_cut(text, vlm_url())
+
+    listener = ear_common.Ear(transcribe, cut=cut)
     try:
         while True:
             msg = await ws.receive()
