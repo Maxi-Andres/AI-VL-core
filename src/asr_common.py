@@ -27,7 +27,7 @@ of iacore keeps working even when faster-whisper is not installed — exactly li
 `yolo_common` does with `ultralytics`.
 
 Config via env:
-    ASR_MODEL         Whisper model size/name (default "base"; run.sh uses "small").
+    ASR_MODEL         Whisper model size/name (default "base"; run.sh uses "large-v3-turbo").
     ASR_DEVICE        "cpu" (default) or "cuda" (run.sh's; falls back to the CPU).
     ASR_COMPUTE_TYPE  CTranslate2 compute type (default "int8"; run.sh: "int8_float16").
     ASR_CUDA12_DIR    a folder with CUDA 12's libcublas(.Lt).so.12, tried first.
@@ -41,10 +41,11 @@ import os
 import time
 
 # Model config from the environment. Read once at import; the process is restarted to
-# change them (like the rest of iacore). linux/run.sh exports small / cuda /
-# int8_float16, the winner of a 2026-10-16 benchmark on 30 Argentine speakers
-# (OpenSLR 61): 2.6 % WER in 0.16 s with 482 MB of VRAM, where these CPU defaults give
-# 8.0 % in 0.47 s and large-v3-turbo 2.2-2.6 % in 0.25 s with 1.3-2.2 GB.
+# change them (like the rest of iacore). linux/run.sh exports large-v3-turbo / cuda /
+# int8_float16. On 30 Argentine speakers reading (OpenSLR 61, 2026-10-16) small tied
+# with it — 2.6 % WER in 0.16 s with 482 MB of VRAM, where these CPU defaults give 8.0 %
+# in 0.47 s — but on the G1's own microphone (2026-10-29) small got 39 % of the words
+# wrong and turbo 18 %, in 0.25 s with 1.25 GB.
 ASR_MODEL = os.environ.get("ASR_MODEL", "base")
 ASR_DEVICE = os.environ.get("ASR_DEVICE", "cpu")
 ASR_COMPUTE_TYPE = os.environ.get("ASR_COMPUTE_TYPE", "int8")
