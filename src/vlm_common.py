@@ -1073,7 +1073,7 @@ def remembered(notes):
 
 def free_prompt_system(robot=None, question=None, search=None, earlier=(), image=None,
                        vlm_url=None, model="default", chat=False, robot_state=None,
-                       robot_notes=None):
+                       robot_notes=None, history=None):
     persona = persona_for(robot, question=question, state=robot_state)
     system = f"{FREE_PROMPT_SYSTEM} {persona}" if persona else FREE_PROMPT_SYSTEM
     # Web results, only when the question needs the web (search_common decides, or the caller
@@ -1083,7 +1083,7 @@ def free_prompt_system(robot=None, question=None, search=None, earlier=(), image
     # CHAT_STYLE goes too.
     from search_common import search_fact
     found = search_fact(question, decided=search, earlier=earlier, image=image, vlm_url=vlm_url,
-                        model=model)
+                        model=model, history=history)
     if found:
         return f"{system} {found}"
     # Talk gets every note. A question about the frame only those that share a word with it:
@@ -1279,7 +1279,8 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
                  or not talks_about_the_frame(prompt, url)))
     system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before,
                                     image=img_b64, vlm_url=url, model=model, chat=chat,
-                                    robot_state=robot_state, robot_notes=robot_notes)
+                                    robot_state=robot_state, robot_notes=robot_notes,
+                                    history=history)
     question = {"role": "user", "content": prompt}
     if not search or about_the_image(prompt):
         question["images"] = [img_b64]

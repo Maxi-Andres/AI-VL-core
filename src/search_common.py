@@ -212,9 +212,15 @@ IDENTIFY = (
     "asks about is not in the image (a person, a past event, something it names), write the "
     "query from the question alone. Add what is asked. In the question's language, at most 12 "
     "words. Only the query.")
+# With a conversation before it, "this" may be what was just SAID, not what is in view: "¿Cómo se
+# llamaba el anterior a éste?" after "El Papa actual es León XIV" searched the controller in
+# front of the camera (2026-10-29).
+IDENTIFY_SAID = (
+    "The conversation so far:\n{said}\nWhen the question points at something the conversation "
+    "names, use that name and not the image.")
 # Now and then the 4B writes why it cannot instead of a query ("no se puede determinar…"):
 # then the question itself is searched.
-_REFUSES = re.compile(r"^\W*(no (se )?puede|no hay|no es posible|cannot|can'?t|no previous|"
+_REFUSES = re.compile(r"^\W*(no (se )?pued[eo]|no hay|no es posible|cannot|can'?t|no previous|"
                       r"unable|not possible)", re.IGNORECASE)
 IDENTIFY_TIMEOUT_S = 6.0
 # What the 4B still adds now and then ("Horario del castillo mostrado en la imagen").
@@ -223,16 +229,20 @@ _IN_THE_IMAGE = re.compile(r"\b((mostrad[oa]|que (se )?ve) )?(en|de) (la|esta) (
                            re.IGNORECASE)
 
 
-def identify_query(question, image_b64, url, model="default", timeout=IDENTIFY_TIMEOUT_S):
+def identify_query(question, image_b64, url, model="default", timeout=IDENTIFY_TIMEOUT_S,
+                   history=None):
     """The query for a question that points at something in view, written by the VLM looking at
     the frame ("¿cuánto cuesta este multímetro?" -> "precio multímetro Fluke 87"); None when
-    the model could not be asked."""
+    the model could not be asked. `history`: the conversation, for a "this" that points at
+    something just said."""
+    said = _said(history)
+    ask = IDENTIFY + ("\n\n" + IDENTIFY_SAID.format(said=said.strip()) if said else "")
     try:
         r = requests.post(f"{url.rstrip('/')}/v1/chat/completions", timeout=timeout, json={
             "model": model, "temperature": 0, "max_tokens": 32,
             "messages": [{"role": "user", "content": [
                 {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64," + image_b64}},
-                {"type": "text", "text": f"{IDENTIFY}\n\nQuestion: {question}"}]}]})
+                {"type": "text", "text": f"{ask}\n\nQuestion: {question}"}]}]})
         r.raise_for_status()
         answer = r.json()["choices"][0]["message"]["content"]
     except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
@@ -242,6 +252,50 @@ def identify_query(question, image_b64, url, model="default", timeout=IDENTIFY_T
     if _REFUSES.search(query):
         return None
     return query[:150] or None
+
+
+# A follow-up names nothing: "¿Cómo se llamaba el Papa anterior a éste?" was searched as it was
+# said, and "¿y cuándo juega?" after "Es River Plate" could not know it was River — the old
+# query only saw the earlier QUESTIONS (2026-10-28). So the model writes the query from the
+# conversation, answers included, and today's date.
+REWRITE = (
+    "You write the web search query for the last message of a conversation. Today is {today}. "
+    "Replace what the message points at (this, that, him, it, the previous one, the one before) "
+    "with the names the conversation gives, and keep every name, place and number. Keep "
+    "relative dates as words (today, last, next, previous). Same language as the last message. "
+    "A few words, no question marks. Answer only the query.")
+REWRITE_TURNS = 3                 # the newest turns the query is written from
+REWRITE_CHARS = 400               # of each answer: the names are near the start
+REWRITE_TIMEOUT_S = 4.0
+
+
+def _said(history):
+    """The newest turns of the conversation as lines: what a query is written from."""
+    turns = [t for t in (history or []) if (t or {}).get("question") and t.get("answer")]
+    return "".join(f"Person: {t['question']}\nRobot: {str(t['answer'])[:REWRITE_CHARS]}\n"
+                   for t in turns[-REWRITE_TURNS:])
+
+
+def write_query(question, history, url, model="default", timeout=REWRITE_TIMEOUT_S):
+    """The search query for `question`, written by the model from the conversation so far
+    ([{"question", "answer"}], oldest first) and today's date; None when it could not be asked."""
+    said = _said(history)
+    try:
+        r = requests.post(f"{url.rstrip('/')}/v1/chat/completions", timeout=timeout, json={
+            "model": model, "temperature": 0, "max_tokens": 32,
+            "messages": [
+                {"role": "system", "content": REWRITE.format(today=datetime.date.today().isoformat())},
+                {"role": "user", "content": f"{said}Person: {question}\n\nSearch query:"}]})
+        r.raise_for_status()
+        answer = r.json()["choices"][0]["message"]["content"]
+    except (requests.RequestException, ValueError, KeyError, IndexError, TypeError):
+        return None
+    lines = answer.strip().splitlines()
+    query = re.sub(r"[¿?¡!]", " ", lines[0] if lines else "").strip(' :".')
+    query = re.sub(r"\s+", " ", query)
+    if not query or _REFUSES.search(query):
+        return None
+    return query[:150]
 
 
 def _topic(question):
@@ -364,21 +418,27 @@ def search(query, url=SEARXNG_URL, timeout=TIMEOUT_S, figure=False):
 
 
 def search_fact(question, url=SEARXNG_URL, decided=None, earlier=(), image=None, vlm_url=None,
-                model="default"):
+                model="default", history=None):
     """What goes to the model for this question: "" when it asks for no search; the results
     with their sources when it does; a plain "the search failed" when it could not be done, so
     the model says so instead of inventing an answer. `decided`: wants_search's answer when the
     caller already has it (the service asks once, to say "searching" first). `earlier`: the
     previous questions, for a follow-up like "buscalo" (search_query). `image` and `vlm_url`: the
-    frame and the VLM server, for a question that points at something in view ("both")."""
+    frame and the VLM server, for a question that points at something in view ("both").
+    `history`: the conversation ([{"question", "answer"}]) the model writes the query from, so
+    "¿y cuánto sale?" after "Es un Samsung Galaxy S24" searches the S24 (write_query)."""
     kind = wants_search(question) if decided is None else decided
     if not kind:
         return ""
     query = None
     if kind == "both" and image and vlm_url:
         t0 = time.monotonic()
-        query = identify_query(question, image, vlm_url, model=model)
+        query = identify_query(question, image, vlm_url, model=model, history=history)
         print(f"[search] identified {query!r} in {time.monotonic() - t0:.1f}s", flush=True)
+    if not query and vlm_url:
+        t0 = time.monotonic()
+        query = write_query(question, history, vlm_url, model=model)
+        print(f"[search] wrote {query!r} in {time.monotonic() - t0:.1f}s", flush=True)
     query = query or search_query(question, earlier)
     t0 = time.monotonic()
     try:

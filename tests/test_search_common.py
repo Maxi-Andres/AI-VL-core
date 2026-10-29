@@ -352,3 +352,34 @@ def test_without_the_model_the_question_itself_is_searched(asked, monkeypatch):
     monkeypatch.setattr(sc.requests, "post", down)
     sc.search_fact("¿Cuánto cuesta este multímetro?", decided="both", image="aGk=", vlm_url="http://vlm")
     assert asked == ["cuanto cuesta este multimetro"]
+
+
+def test_a_follow_up_searches_what_the_conversation_named(asked, monkeypatch):
+    """Catches: "¿Cómo se llamaba el anterior a éste?" searched as said, and "¿y cuánto sale?"
+    after "Es un Samsung Galaxy S24" unable to know which phone — the query only saw the
+    earlier questions (2026-10-28). The model writes it, answers included."""
+    sent = []
+    monkeypatch.setattr(sc.requests, "post", _Chat("precio Samsung Galaxy S24", sent))
+    history = [{"question": "¿Qué celular es este?", "answer": "Es un Samsung Galaxy S24 negro."}]
+    sc.search_fact("¿Y cuánto sale?", decided="web", vlm_url="http://vlm", history=history)
+    assert asked == ["precio Samsung Galaxy S24"], "names keep their capitals"
+    told = sent[0]["messages"][1]["content"]
+    assert "Es un Samsung Galaxy S24 negro." in told and told.rstrip().endswith("Search query:")
+    assert "Today is 20" in sent[0]["messages"][0]["content"], "relative dates need today"
+
+
+def test_a_written_query_loses_its_question_marks_and_refusals(monkeypatch):
+    monkeypatch.setattr(sc.requests, "post", _Chat('"¿Cuándo juega River Plate?"\nexplanation', []))
+    assert sc.write_query("¿Cuándo juega?", [], "http://vlm") == "Cuándo juega River Plate"
+    monkeypatch.setattr(sc.requests, "post", _Chat("No puedo ver la imagen", []))
+    assert sc.write_query("¿Cuándo juega?", [], "http://vlm") is None
+
+
+def test_without_the_model_a_follow_up_still_searches_the_previous_question(asked, monkeypatch):
+    def down(*a, **k):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(sc.requests, "post", down)
+    sc.search_fact("buscalo en internet vos", decided="web", earlier=["¿Quién es Lionel Messi?"],
+                   vlm_url="http://vlm")
+    assert asked == ["quien es lionel messi"]
