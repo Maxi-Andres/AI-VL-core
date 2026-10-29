@@ -1241,7 +1241,7 @@ def history_messages(history, budget=HISTORY_CHARS):
 
 def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
                      url=OLLAMA_HOST, robot=None, history=None, search=None, usage=None,
-                     robot_state=None, robot_notes=None):
+                     robot_state=None, robot_notes=None, looks=None):
     """Stream a FREE-PROMPT answer token by token (a generator of text pieces).
 
     This is the streaming sibling of query_vlm for the "ask anything" case only:
@@ -1274,9 +1274,11 @@ def query_vlm_stream(img_b64, model, prompt, max_tokens=8192, num_ctx=16384,
     # Talk or a question about the frame: only llama-server is asked (the CLI stays as it was).
     # A question about itself (one of its facts or its state answers it) is talk without asking:
     # "¿Cuánta batería tenés?" was taken for the frame and answered "¡Hola!… 😊" (2026-10-28).
+    # `looks`: talks_about_the_frame's answer when the caller asked it already (the service
+    # asks it beside its other questions, at once).
     chat = (not search and vlm_backend() == "llamacpp"
             and (asks_about_itself(robot, prompt, robot_state)
-                 or not talks_about_the_frame(prompt, url)))
+                 or not (talks_about_the_frame(prompt, url) if looks is None else looks)))
     system_msg = free_prompt_system(robot, question=prompt, search=search, earlier=asked_before,
                                     image=img_b64, vlm_url=url, model=model, chat=chat,
                                     robot_state=robot_state, robot_notes=robot_notes,

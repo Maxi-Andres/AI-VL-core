@@ -104,3 +104,64 @@ def test_the_route_reads_the_frame_only_for_seen(monkeypatch):
         monkeypatch.setattr(kc, "wants_kept", lambda text, url: ("picture", ""))
         c.post("/keep", json={"text": "sacá una foto", "image": "AAAA"})
     assert read == ["AAAA"]
+
+
+@pytest.fixture
+def stream(monkeypatch):
+    """/vlm/stream with every question to the model faked: each takes 0.2 s, like a round trip
+    to a rented GPU abroad; `asked` says which ones were asked."""
+    monkeypatch.setenv("IACORE_WARM_UP", "0")
+    import time
+
+    import search_common as sc
+    import service
+    monkeypatch.setattr(vc, "vlm_backend", lambda: "llamacpp")
+    asked = []
+
+    def slow(name, answer):
+        def ask(*a, **k):
+            asked.append(name)
+            time.sleep(0.2)
+            return answer
+        return ask
+
+    monkeypatch.setattr(sc, "wants_search", slow("search", False))
+    monkeypatch.setattr(vc, "talks_about_the_frame", slow("looks", False))
+    monkeypatch.setattr(kc, "wants_kept", slow("keep", (None, "")))
+    answered = []
+    monkeypatch.setattr(vc, "query_vlm_stream", lambda *a, **k: answered.append(k) or iter(["Hola."]))
+    with TestClient(service.app) as c:
+        yield c, service, asked, answered, slow
+
+
+def test_a_note_is_said_first_and_nothing_is_answered(stream, monkeypatch):
+    c, service, _asked, answered, slow = stream
+    monkeypatch.setattr(kc, "wants_kept", slow("keep", ("note", "el código es 4455")))
+    body = c.post("/vlm/stream", json={"image": "aGk=", "prompt": "Acordate que el código es 4455",
+                                       "keep": True}).text
+    assert body == service.keep_mark({"decided": True, "keep": "note", "note": "el código es 4455"})
+    assert answered == [], "the gateway keeps it and says so: the model answers nothing"
+
+
+def test_a_question_gets_the_mark_then_the_answer(stream):
+    c, service, _asked, answered, _ = stream
+    body = c.post("/vlm/stream", json={"image": "aGk=", "prompt": "¿Qué ves?", "keep": True}).text
+    assert body == service.keep_mark({"decided": True, "keep": None, "note": ""}) + "Hola."
+    assert answered[0]["looks"] is False, "the look asked beside the others goes along"
+
+
+def test_without_keep_there_is_no_mark(stream):
+    c, _service, asked, _answered, _ = stream
+    assert c.post("/vlm/stream", json={"image": "aGk=", "prompt": "¿Qué ves?"}).text == "Hola."
+    assert "keep" not in asked
+
+
+def test_the_questions_before_the_answer_are_asked_at_once(stream):
+    """Catches: keep, web and look asked one after the other — a round trip each, ~0.6 s more
+    per question with the model on a rented GPU abroad (2026-10-29)."""
+    import time
+    c, _service, asked, _answered, _ = stream
+    t0 = time.monotonic()
+    c.post("/vlm/stream", json={"image": "aGk=", "prompt": "¿Qué ves?", "keep": True})
+    assert sorted(asked) == ["keep", "looks", "search"]
+    assert time.monotonic() - t0 < 0.45, "three 0.2 s questions took one, not three"

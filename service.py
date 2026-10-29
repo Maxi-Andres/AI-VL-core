@@ -45,6 +45,7 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 # The detection logic lives in src/ within THIS repo (a local file import, not a
@@ -176,6 +177,10 @@ class VlmStreamRequest(BaseModel):
     robot_state: dict | None = None
     # What it was asked to remember ("acordate que…", kept by the gateway): for talk only.
     robot_notes: list[str] | None = Field(default=None, max_length=100)
+    # The gateway keeps pictures and notes: with `keep`, whether the message asks to keep
+    # something is decided here, beside the other questions to the model, and said first
+    # (keep_mark) — one trip instead of a /keep before every question.
+    keep: bool = False
 
 
 class SpeakRequest(BaseModel):
@@ -482,6 +487,25 @@ class KeepRequest(BaseModel):
     image: str = ""          # the frame the message was said over; read only for "seen"
 
 
+# The first thing a /vlm/stream with `keep` says, for the gateway only (it strips it):
+# {"decided", "keep", "note"} like /keep, between record separators like the other marks.
+KEEP_MARK = "\x1ekeep "
+
+
+def keep_mark(kept):
+    return f"{KEEP_MARK}{json.dumps(kept, ensure_ascii=False, separators=(',', ':'))}\x1e"
+
+
+def keep_answer(said, text, image_b64):
+    """keep_common's answer as the gateway reads it; for "seen", the fact read off the frame."""
+    if said is None:
+        return {"decided": False, "keep": None, "note": ""}
+    kind, note = said
+    if kind == "seen" and image_b64:
+        note = keep_common.seen_fact(text, note, image_b64, vlm_url()) or note
+    return {"decided": True, "keep": kind, "note": note}
+
+
 @app.post("/keep")
 async def keep(req: KeepRequest):
     """Does this message ask the robot to keep something (keep_common)? The gateway stores it;
@@ -491,13 +515,7 @@ async def keep(req: KeepRequest):
     if vlm_common.vlm_backend() != "llamacpp" or not req.text.strip():
         return {"decided": False, "keep": None, "note": ""}
     said = await run_in_threadpool(keep_common.wants_kept, req.text, vlm_url())
-    if said is None:
-        return {"decided": False, "keep": None, "note": ""}
-    kind, note = said
-    if kind == "seen" and req.image:
-        note = await run_in_threadpool(keep_common.seen_fact, req.text, note, req.image,
-                                       vlm_url()) or note
-    return {"decided": True, "keep": kind, "note": note}
+    return await run_in_threadpool(keep_answer, said, req.text, req.image)
 
 
 @app.post("/vlm/stream")
@@ -520,11 +538,26 @@ async def vlm_stream(req: VlmStreamRequest):
 
     def gen():
         try:
-            # Whether it needs the web, decided once: by the llama-server itself (~27 ms, text
-            # only) when that is the backend, else only when asked (search_common.wants_search).
             usage = {}
             classifier = vlm_url() if vlm_common.vlm_backend() == "llamacpp" else None
-            search = search_common.wants_search(prompt, classifier_url=classifier)
+            # The short questions to the model before the answer, asked at once: whether it asks
+            # to keep something, whether it needs the web (by the llama-server itself, ~27 ms,
+            # text only; else only when asked — search_common.wants_search), and whether it is
+            # about the frame. One after the other they cost a round trip each, ~0.6 s more per
+            # question with the model on a rented GPU abroad (measured 2026-10-29, 150 ms RTT).
+            asks = {"search": lambda: search_common.wants_search(prompt, classifier_url=classifier)}
+            if classifier:
+                asks["looks"] = lambda: vlm_common.talks_about_the_frame(prompt, classifier)
+            if req.keep and classifier:
+                asks["keep"] = lambda: keep_common.wants_kept(prompt, classifier)
+            with ThreadPoolExecutor(len(asks)) as pool:
+                said = {k: f.result() for k, f in {k: pool.submit(a) for k, a in asks.items()}.items()}
+            if req.keep:
+                kept = keep_answer(said.get("keep"), prompt, b64)
+                yield keep_mark(kept)
+                if kept["decided"] and kept["keep"]:
+                    return                    # the gateway keeps it and says so: no answer
+            search = said["search"]
             # Said before the search starts (it takes 1-4 s), so the page can show "Buscando en
             # internet…" instead of a silent wait. The page strips the mark (api/backend.ts).
             if search:
@@ -540,6 +573,7 @@ async def vlm_stream(req: VlmStreamRequest):
                 robot_notes=req.robot_notes,
                 search=search,
                 usage=usage,
+                looks=said.get("looks"),
             )
             # Last: how much of the window this question took (the page's conversation meter).
             if usage.get("prompt_tokens") is not None:
