@@ -234,6 +234,10 @@ def main(go):
         else:
             try:
                 cur = measured_q()
+                # Folded as the user showed before going home, the arm still and away from the
+                # bottle (at `wide`, where the slide out ended).
+                set_hand(session, FIST)
+                time.sleep(1.5)
                 print("back:", run_trajectory(session, timed(cur, [q_wide, straight, *way_up[::-1], q0])).get("state"))
             except RuntimeError as exc:
                 print("back:", exc)
