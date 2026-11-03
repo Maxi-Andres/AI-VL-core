@@ -109,14 +109,21 @@ class Executor:
                 out = {}
             return {"ok": False, "http": exc.code, **out}
 
-    def joints(self):
-        """One line of the joint stream (q, temp, hands)."""
-        with urllib.request.urlopen(f"{self.url}/joints/stream?robot={self.robot}",
-                                    timeout=5) as r:
-            for line in r:
-                d = json.loads(line)
-                if d.get("q"):
-                    return d
+    def joints(self, tries=4):
+        """One line of the joint stream (q, temp, hands). A few tries: the executor answered
+        502 to 8 of 10 opens in a row on 2026-11-03 while the relay behind it streamed fine."""
+        for k in range(tries):
+            try:
+                with urllib.request.urlopen(f"{self.url}/joints/stream?robot={self.robot}",
+                                            timeout=5) as r:
+                    for line in r:
+                        d = json.loads(line)
+                        if d.get("q"):
+                            return d
+            except (urllib.error.URLError, TimeoutError):
+                if k == tries - 1:
+                    raise
+                time.sleep(0.5)
         raise ActionError("the joint stream sent nothing")
 
     def measured_q(self):
@@ -227,6 +234,13 @@ def target_margin(qa, qb, target, tip=HAND_TIP, steps=25, below=0.0):
     return worst
 
 
+def grasp_height(scene):
+    """How far above the table the hand closes: GRASP_AT of the object, but never so low that
+    the hand's lower edge comes within CLEAR_M + 1 cm of the table (a 22 cm bottle at 0.4 left
+    it at 4.0 cm, refused, 2026-11-03)."""
+    return max(GRASP_AT * scene.height, HAND_BELOW_M + CLEAR_M + 0.01)
+
+
 def tilt_deg(q, q_ref):
     """How far an object held upright at pose q_ref leans off upright at pose q."""
     up = np.array([0.0, 0.0, 1.0])
@@ -277,7 +291,7 @@ def plan_place(plan, scene, target):
     """The carry of a place, appended to `plan` and checked with the object hanging from the
     hand, which keeps it upright (MAX_TILT_DEG)."""
     up = np.array([0.0, 0.0, 1.0])
-    below = GRASP_AT * scene.height                     # the object's bottom under the grasp
+    below = grasp_height(scene)                         # the object's bottom under the grasp
     top = target.base[2] + target.height
     lifted = ik.forward(SIDE, plan.lifted)[0]
     carry_z = max(lifted[2], top + CARRY_CLEAR_M + below)
@@ -285,7 +299,7 @@ def plan_place(plan, scene, target):
     # Up clear of the object's top in case it lands standing (on a floor at the table's
     # height), the hand's lowest part above it.
     clear_z = down_z + max(CARRY_CLEAR_M - RELEASE_ABOVE_M,
-                           (1 - GRASP_AT) * scene.height - target.height + HAND_BELOW_M + 0.02)
+                           scene.height - below - target.height + HAND_BELOW_M + 0.02)
     over_xy = target.base[:2]
     # Only the object's axis is held up, as it was held at the grasp; the turn about it does not
     # lean it, so it is left to the arm: more room for the carry than the whole orientation.
@@ -329,7 +343,7 @@ def plan_pick(q0, scene, taught, place_at=None):
     """The joint postures of a pick, checked; with `place_at` (a Scene), the carry to it too.
     ActionError with the reason if any check fails."""
     up = np.array([0.0, 0.0, 1.0])
-    target = scene.base + GRASP_AT * scene.height * up
+    target = scene.base + grasp_height(scene) * up
     approach = ik.approach_direction(SIDE, target)
     palm = np.cross(up, approach)
     way_up = [taught[n] for n in ("way_up_2", "way_up_3", "way_up_4", "ready")]
