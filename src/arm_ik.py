@@ -198,11 +198,13 @@ class Unreachable(ValueError):
 
 
 def solve(side, target, seed, finger_dir=None, palm_dir=None, tool=None, iters=300,
-          tol=0.005, damping=0.02):
+          tol=0.005, damping=0.02, keep=()):
     """7 angles putting the tool at `target` (torso_link, metres), or Unreachable.
 
     `finger_dir` / `palm_dir`: where the fingers should point and the palm should face (unit
-    vectors in torso_link), each optional. POSITION FIRST: the orientation is improved only in
+    vectors in torso_link), each optional; `keep`: more (hand-frame axis, torso-frame direction)
+    pairs, e.g. "the axis of the bottle held stays up" with the turn about it left free.
+    POSITION FIRST: the orientation is improved only in
     what the position leaves free (the null space of its Jacobian — 7 joints, 3 for position),
     a step at a time, each kept only if the hand is still on the target, so it can never pull
     the hand off it; it is met as well as the arm and its limits allow. A weighted mix of the
@@ -211,8 +213,9 @@ def solve(side, target, seed, finger_dir=None, palm_dir=None, tool=None, iters=3
     lo, hi = limits(side)
     target = np.asarray(target, dtype=np.float64)
     palm_axis = PALM_NORMAL[side]
-    wants = [(w / np.linalg.norm(w), local)
-             for w, local in ((finger_dir, FINGER_AXIS), (palm_dir, palm_axis)) if w is not None]
+    wants = [(np.asarray(w, dtype=np.float64) / np.linalg.norm(w), np.asarray(local))
+             for w, local in ((finger_dir, FINGER_AXIS), (palm_dir, palm_axis),
+                              *((w, a) for a, w in keep)) if w is not None]
 
     def reach(q, steps):
         """Position-only damped least squares from q."""
@@ -250,7 +253,11 @@ def solve(side, target, seed, finger_dir=None, palm_dir=None, tool=None, iters=3
         rows, errs = [], []
         for w, local in wants:
             have = rot @ local
-            errs.append(np.cross(have, w))
+            # The row below is d(have)/dq (have turns as omega x have), so the error is the
+            # change wanted in `have` itself. It was cross(have, w) — the AXIS to turn about,
+            # perpendicular to that change — which stepped sideways and was kept only when it
+            # helped by luck: the pick's hand stayed 6-12 degrees off (fixed 2026-11-03).
+            errs.append(w - have)
             skew = np.array([[0, -have[2], have[1]], [have[2], 0, -have[0]],
                              [-have[1], have[0], 0]])
             rows.append(-skew @ jr)

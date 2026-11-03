@@ -126,3 +126,25 @@ def test_the_pre_grasp_keeps_the_fingertips_off_the_object():
     approach = np.asarray(plan["approach"])
     short = approach @ (np.asarray(BOTTLE_GRASP) - tip)
     assert short >= 0.035 + ik.TIP_CLEARANCE_M - 0.01
+
+
+def test_the_orientation_is_met_when_the_arm_can_meet_it():
+    """The defect (2026-11-03): the orientation step aimed at cross(have, want), the axis to
+    turn about, instead of the change wanted in `have` — perpendicular to it. It moved only when
+    a sideways step happened to help, and left the pick's hand 6-25 degrees off. Here a reachable
+    point and orientation, from the ready pose, must come out within a degree."""
+    target = np.array(BOTTLE_GRASP)
+    fingers = ik.approach_direction("right", target)
+    palm = np.cross([0.0, 0.0, 1.0], fingers)
+    q = ik.solve("right", target, READY, finger_dir=fingers, palm_dir=palm)
+    err = ik.orientation_error_deg("right", q, fingers, palm)
+    assert err["fingers"] < 1.0 and err["palm"] < 1.0, err
+
+
+def test_keep_holds_one_axis_and_leaves_the_turn_about_it_free():
+    """What a carry asks: the bottle's axis (here the hand's own z) stays up, anywhere."""
+    up = np.array([0.0, 0.0, 1.0])
+    for target in ((0.35, -0.20, 0.15), (0.40, -0.35, 0.20)):
+        q = ik.solve("right", target, READY, keep=[(np.array([0.0, 0.0, 1.0]), up)])
+        have = ik.forward("right", q)[1] @ np.array([0.0, 0.0, 1.0])
+        assert np.degrees(np.arccos(np.clip(have @ up, -1, 1))) < 1.0
