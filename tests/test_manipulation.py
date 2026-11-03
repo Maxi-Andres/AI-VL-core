@@ -153,3 +153,98 @@ def test_one_action_at_a_time(monkeypatch):
     monkeypatch.setitem(m._CURRENT, "id", slow.id)
     with pytest.raises(m.ActionError, match="another action"):
         m.start_pick("the cup", executor=ex, locate_fn=lambda p: SCENE)
+
+
+# --------------------------------------------------------------------------- #
+# Placing
+# --------------------------------------------------------------------------- #
+# A 10 cm tall box, 16 cm across, 34 cm to the robot's right of the bottle: where the sweep of
+# 2026-11-03 found the right arm can carry it upright with every check passing.
+BOX = m.Scene(base=np.array([0.40, -0.35, -0.028]), height=0.10, spread=0.005, table_z=-0.028,
+              edge_x=0.30, chosen="vlm bbox", radius=0.08)
+
+
+def place(ex, **kw):
+    return m.PickAction("the bottle", executor=ex, locate_fn=lambda p: SCENE, into="the box",
+                        locate_target_fn=lambda p: BOX, **kw)
+
+
+def trajectories(ex):
+    return [o for o in ex.ops if o["op"] == "trajectory"]
+
+
+def last_q(traj):
+    return np.array(list(traj["points"][-1]["q"].values()))
+
+
+def test_a_good_place_carries_it_over_lets_go_there_and_goes_home():
+    ex = FakeExecutor()
+    act = run(place(ex))
+    assert act.state == "success", act.events
+    assert act.result["placed"] is True
+    steps = [e["step"] for e in act.events]
+    order = ["grasp held", "lifted", "carrying it", "lowering", "let go", "going home", "done"]
+    assert [s for s in steps if s in order] == order
+    assert "put down" not in steps, "placing is instead of putting it back"
+    assert act.snapshot()["verb"] == "place" and act.snapshot()["into"] == "the box"
+
+
+def test_it_lets_go_over_the_target_not_where_it_was():
+    """The defect: opening the hand anywhere but over the box drops the bottle on the table."""
+    ex = FakeExecutor()
+    act = run(place(ex))
+    k = next(i for i, o in enumerate(ex.ops) if o["op"] == "open")
+    before = [o for o in ex.ops[:k] if o["op"] == "trajectory"][-1]
+    hand = m.ik.forward(m.SIDE, last_q(before))[0]
+    assert np.linalg.norm((hand - BOX.base)[:2]) < 0.01, "let go away from the box"
+    assert hand[2] > BOX.base[2] + BOX.height, "let go inside the box's wall"
+    assert act.state == "success"
+
+
+def test_the_carried_object_stays_upright():
+    """The defect: the first carry leaned the bottle 23 degrees 15 cm up — the IK's orientation
+    step pushed sideways (test_arm_ik), so the wrist never straightened it."""
+    plan = m.plan_pick(HANG, SCENE, m.taught_poses(), BOX)
+    for q in (plan.place.carry, plan.place.over, plan.place.down):
+        assert m.tilt_deg(q, plan.grasp) < 2.0
+
+
+def test_a_box_in_the_hands_way_is_refused_before_moving():
+    """The defect: a target right where the hand comes down beside the bottle."""
+    in_the_way = m.Scene(base=np.array([0.44, -0.20, -0.028]), height=0.10, spread=0.005,
+                         table_z=-0.028, edge_x=0.30, chosen="vlm bbox", radius=0.08)
+    ex = FakeExecutor()
+    act = run(m.PickAction("the bottle", executor=ex, locate_fn=lambda p: SCENE, into="the box",
+                           locate_target_fn=lambda p: in_the_way))
+    assert act.state == "failure" and "take" not in ex.verbs()
+    assert "target" in act.events[-1]["detail"]
+
+
+def test_a_dry_run_plans_and_never_takes_the_arm():
+    ex = FakeExecutor()
+    act = run(place(ex, dry=True))
+    assert act.state == "success" and act.result["dry"] is True
+    assert ex.ops == [], "a dry run must not touch the robot"
+    assert "carry->over target" in act.result["margins_cm"]
+
+
+def test_cancel_while_carrying_puts_it_back_where_it_was_first():
+    """The defect: a STOP mid-carry folding the hand into a fist in the air, which drops it."""
+    ex = FakeExecutor()
+    act = place(ex)
+    real_move = act._move
+
+    def move_then_cancel(*a, **kw):
+        real_move(*a, **kw)
+        if kw.get("what") == "carrying it":
+            act.cancel()
+    act._move = move_then_cancel
+    run(act)
+    assert act.state == "cancelled"
+    k = max(i for i, o in enumerate(ex.ops) if o["op"] == "open")
+    before = [o for o in ex.ops[:k] if o["op"] == "trajectory"][-1]
+    plan = m.plan_pick(HANG, SCENE, m.taught_poses(), BOX)
+    assert np.allclose(last_q(before), plan.grasp, atol=1e-3), "opened away from where it was"
+    fist = [i for i, o in enumerate(ex.ops) if o["op"] == "hand" and o.get("finger") == 2]
+    assert fist[-1] > k, "the fist comes only after letting go"
+    assert ex.verbs()[-1] == "release"

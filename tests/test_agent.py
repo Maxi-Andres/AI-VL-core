@@ -141,6 +141,24 @@ def test_pick_streams_every_step_of_the_action_once():
     assert [e["step"] for e in events] == ["looking", "found", "done"]
 
 
+def test_place_asks_for_the_target_and_reports_whether_it_was_placed():
+    """The defect: a place with nowhere named starting a pick, or its result losing "placed"."""
+    events, emit = collect()
+    assert not ag.tool_place({"object": "the bottle"}, emit, threading.Event(),
+                             start=lambda o, **kw: None)["ok"]
+    act, asked = FakeAction(), {}
+
+    def start(obj, **kw):
+        asked.update(kw, object=obj)
+        return act
+    real = act.snapshot
+    act.snapshot = lambda since=0: {**real(since), "result": {"held": True, "placed": True}}
+    out = ag.tool_place({"object": "the bottle", "into": "the box"}, emit, threading.Event(),
+                        start=start, poll_s=0)
+    assert asked == {"object": "the bottle", "into": "the box"}
+    assert out["ok"] and out["placed"] and events[0]["tool"] == "place"
+
+
 def test_a_model_that_stops_answering_ends_the_run_cleanly():
     """The defect (2026-11-03): llama-server went down mid-run and the exception escaped the
     loop — the stream would end with no reply and the tab would wait forever."""

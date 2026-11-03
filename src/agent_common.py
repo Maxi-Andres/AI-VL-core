@@ -38,6 +38,13 @@ TOOLS = {
                 "lifts it, puts it back where it was and brings the arm home. MOVES THE ROBOT. "
                 "Only objects standing on the table, about the size of a bottle or a cup.",
     },
+    "place": {
+        "args": {"object": "the thing to move, in words, e.g. 'the water bottle'",
+                 "into": "where to put it, in words, e.g. 'the cardboard box'"},
+        "does": "Picks the object up from the table with the right hand, carries it over the "
+                "other thing on the table, lets go of it there and brings the arm home. MOVES "
+                "THE ROBOT. Use it to put something in or on something else; check with look.",
+    },
 }
 
 
@@ -103,13 +110,25 @@ def tool_look(args, emit, stop, url=LLAMACPP_HOST):
 def tool_pick(args, emit, stop, start=None, poll_s=0.5):
     """Run a manipulation.PickAction to its end, every step of it emitted as a tool event.
     `stop` (the STOP button) cancels it; the arm then goes home before this returns."""
+    return _run_action("pick", args, emit, stop, start, poll_s)
+
+
+def tool_place(args, emit, stop, start=None, poll_s=0.5):
+    """The same, carrying the object to args["into"] instead of putting it back."""
+    into = str(args.get("into") or "").strip()
+    if not into:
+        return {"ok": False, "error": "no place to put it named"}
+    return _run_action("place", args, emit, stop, start, poll_s, into=into)
+
+
+def _run_action(tool, args, emit, stop, start, poll_s, **kw):
     import manipulation
     start = start or manipulation.start_pick
     obj = str(args.get("object") or "").strip()
     if not obj:
         return {"ok": False, "error": "no object named"}
     try:
-        act = start(obj)
+        act = start(obj, **kw)
     except manipulation.ActionError as exc:
         return {"ok": False, "error": str(exc)}
     seen = 0
@@ -118,17 +137,21 @@ def tool_pick(args, emit, stop, start=None, poll_s=0.5):
             act.cancel()
         snap = act.snapshot(seen)
         for ev in snap["events"]:
-            emit({"type": "tool_event", "tool": "pick", "step": ev["step"],
+            emit({"type": "tool_event", "tool": tool, "step": ev["step"],
                   "detail": ev["detail"]})
         seen += len(snap["events"])
         if snap["state"] != "running" and not act.thread.is_alive():
-            return {"ok": snap["state"] == "success", "state": snap["state"],
-                    "held": bool((snap.get("result") or {}).get("held")),
-                    "last": snap["events"][-1]["detail"] if snap["events"] else ""}
+            result = snap.get("result") or {}
+            out = {"ok": snap["state"] == "success", "state": snap["state"],
+                   "held": bool(result.get("held")),
+                   "last": snap["events"][-1]["detail"] if snap["events"] else ""}
+            if "placed" in result:
+                out["placed"] = bool(result["placed"])
+            return out
         time.sleep(poll_s)
 
 
-TOOL_FNS = {"look": tool_look, "pick": tool_pick}
+TOOL_FNS = {"look": tool_look, "pick": tool_pick, "place": tool_place}
 
 
 # --------------------------------------------------------------------------- #

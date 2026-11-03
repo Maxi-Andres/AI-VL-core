@@ -666,6 +666,26 @@ def actions_pick(req: PickRequest):
     return act.snapshot()
 
 
+class PlaceRequest(PickRequest):
+    into: str = Field(..., min_length=1, max_length=120,
+                      description="where to put it, in words: 'the cardboard box'")
+    dry: bool = Field(False, description="locate and plan only: the arm is never taken")
+
+
+@app.post("/actions/place")
+def actions_place(req: PlaceRequest):
+    """Start moving `object` into/onto `into`: pick it up, carry it over, let go, go home
+    (src/manipulation.py). Same contract as /actions/pick; `dry` answers whether it can be done
+    from where things stand (the plan's margins) without moving. MOVES THE ROBOT unless dry."""
+    try:
+        act = manipulation.start_pick(
+            req.object.strip(), into=req.into.strip(), dry=req.dry,
+            locate_fn=lambda p: manipulation.locate(p, classes=tuple(req.classes)))
+    except manipulation.ActionError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    return act.snapshot()
+
+
 @app.get("/actions/{action_id}")
 def actions_get(action_id: str, since: int = Query(0, ge=0)):
     """An action's state, its step now and its events from index `since` (poll with the count

@@ -70,6 +70,19 @@ def test_cancel_reaches_the_action(client):
     assert c.get("/actions/nope").status_code == 404
 
 
+def test_a_place_passes_where_and_dry_to_the_action(client, monkeypatch):
+    c, _ = client
+    seen = {}
+
+    def start(phrase, **kw):
+        seen.update(kw)
+        return FakeAction(phrase)
+    monkeypatch.setattr(manipulation, "start_pick", start)
+    r = c.post("/actions/place", json={"object": "the bottle", "into": "the box", "dry": True})
+    assert r.status_code == 200 and seen["into"] == "the box" and seen["dry"] is True
+    assert c.post("/actions/place", json={"object": "the bottle"}).status_code == 422
+
+
 def test_an_empty_object_is_refused(client):
     c, _ = client
     assert c.post("/actions/pick", json={"object": ""}).status_code == 422
