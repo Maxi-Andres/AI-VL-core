@@ -1,0 +1,5 @@
+# Run outputs: pictures, depth snapshots, measured poses. Never committed.
+*.jpg
+*.npy
+*.json
+*.mp4

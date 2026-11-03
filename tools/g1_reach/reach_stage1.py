@@ -49,7 +49,7 @@ def locate_three():
     for _ in range(3):
         z, _info = lo.fetch_depth(frames=5)
         frame = lo.grab_color()
-        box, how, _ = lo.choose(frame, ["bottle", "cup"], "the water bottle")
+        box, _how, _ = lo.choose(frame, ["bottle", "cup"], "the water bottle")
         if box is None:
             continue
         h, w = frame.shape[:2]
@@ -103,14 +103,14 @@ def timed(q_from, poses, vel_fraction=0.4):
     pts, t, prev = [], 0.0, q_from
     for q in poses:
         t += max(2.0, float(np.abs(q - prev).max()) / (ik.MAX_VEL * vel_fraction))
-        pts.append({"t": round(t, 2), "q": {n: round(float(v), 4) for n, v in zip(NAMES, q)}})
+        pts.append({"t": round(t, 2), "q": {n: round(float(v), 4) for n, v in zip(NAMES, q, strict=False)}})
         prev = q
     return pts
 
 
 def main(go):
     q0 = measured_q()
-    base, height, spread, edge_x, frame = locate_three()
+    base, height, spread, edge_x, _frame = locate_three()
     table_z = base[2]
     up = np.array([0.0, 0.0, 1.0])
     grasp = base + height / 2 * up

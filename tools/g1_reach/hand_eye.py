@@ -22,11 +22,11 @@ import locate_object as lo
 import perception3d as p3
 
 sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
-from reach_stage1 import CLEAR_M, check_path, measured_q, post, run_trajectory, timed
+from reach_stage1 import CLEAR_M, check_path, locate_three, measured_q, post, run_trajectory, timed
 
 CAL = p3.load_calibration(lo.CALIBRATION)
 HAND_CENTRE = np.array([0.06, 0.0, 0.0])   # wrist_yaw link: the middle of the BrainCo's palm+fingers
-SEARCH_M = 0.14
+SEARCH_M = 0.18     # the model was 8-10 cm off on 2026-11-03: look wide
 
 
 def torso_cloud(z):
@@ -43,7 +43,7 @@ def table_height(T):
 
 
 def model_hand(q):
-    p, rot, joints = ik.forward("right", q, tool=HAND_CENTRE)
+    p, rot, _joints = ik.forward("right", q, tool=HAND_CENTRE)
     return p, rot
 
 
@@ -54,20 +54,29 @@ def seen_hand(T, centre, table_z):
     c = np.median(near, axis=0)
     near = near[np.linalg.norm(near - c, axis=1) < 0.09]      # drop the forearm's tail
     c = np.median(near, axis=0)
-    _u, s, vt = np.linalg.svd(near - near.mean(axis=0), full_matrices=False)
+    _u, _s, vt = np.linalg.svd(near - near.mean(axis=0), full_matrices=False)
     return c, vt[2], len(near)
 
 
 def main(go):
     q0 = measured_q()
-    z, _ = lo.fetch_depth(frames=5)
-    T = torso_cloud(z)
-    table_z = table_height(T)
-    edge_x = float(np.percentile(T[np.abs(T[:, 2] - table_z) < 0.015][:, 0], 2))
-    # Close to the body on the way up (user, 2026-11-03), then three free points.
-    raise_pt = np.array([0.10, -0.17, table_z + 0.20])
-    targets = [np.array([0.27, -0.20, table_z + 0.16]), np.array([0.22, -0.12, table_z + 0.22]),
-               np.array([0.30, -0.26, table_z + 0.12])]
+    # The table: the bottle locates it (its base is ON the table) — a histogram of heights picked
+    # the laptop once (z 0.038 against -0.029). The bottle is then TAKEN AWAY (--no-bottle with
+    # the table height measured before), because the hand must be where the camera looks, and
+    # that is where the bottle stood: on 2026-11-03 three points beside it were out of view.
+    if "--table" in sys.argv:
+        table_z = float(sys.argv[sys.argv.index("--table") + 1])
+        edge_x = float(sys.argv[sys.argv.index("--edge") + 1])
+    else:
+        base, _height, _spread, edge_x, _frame = locate_three()
+        table_z = float(base[2])
+        print(f"bottle at {np.round(base, 3)}: now take it away and rerun with "
+              f"--table {table_z:.3f} --edge {edge_x:.3f}")
+        return
+    raise_pt = np.array([0.10, -0.16, table_z + 0.20])
+    # In the middle of the picture, in front of the robot, at three heights.
+    targets = [np.array([0.30, -0.10, table_z + 0.14]), np.array([0.26, -0.06, table_z + 0.20]),
+               np.array([0.33, -0.14, table_z + 0.10])]
     fd = np.array([1.0, 0.0, 0.0])
     palm = np.cross([0, 0, 1.0], fd)
     q_raise = ik.solve("right", raise_pt, q0, finger_dir=fd, palm_dir=palm)
@@ -76,7 +85,8 @@ def main(go):
         prev = ik.solve("right", t, prev, finger_dir=fd, palm_dir=palm)
         qs.append(prev)
     segs = [(q0, q_raise), (q_raise, qs[0]), (qs[0], qs[1]), (qs[1], qs[2]), (qs[2], q_raise)]
-    clear = check_path(segs, table_z, edge_x)
+    # As if the edge were 10 cm nearer: the real hand landed that much further than the model.
+    clear = check_path(segs, table_z, edge_x - 0.10)
     print(f"table z {table_z:.3f}, edge x {edge_x:.3f}; lowest arm point past the edge "
           f"{clear * 100:.1f} cm above it (need {CLEAR_M * 100:.0f})")
     print("raise", np.round(raise_pt, 3), "targets", [np.round(t, 3).tolist() for t in targets])
@@ -97,8 +107,10 @@ def main(go):
     threading.Thread(target=keepalive, daemon=True).start()
     results = []
     try:
+        post({"op": "open", "session": session, "side": "right"})
+        time.sleep(1.0)
         cur = q0
-        for k, q in enumerate([q_raise] + qs):
+        for k, q in enumerate([q_raise, *qs]):
             tr = run_trajectory(session, timed(cur, [q]))
             if tr.get("state") != "success":
                 print("stopped:", tr)
@@ -111,6 +123,11 @@ def main(go):
             zz, _ = lo.fetch_depth(frames=5)
             cv2.imwrite(f"hand_{k}.jpg", lo.grab_color())
             pm, rot = model_hand(qm)
+            uv = p3.project(p3.to_color_frame(np.array([p3.OPTICAL_TO_LINK.T @ (
+                p3.rpy_matrix(*p3.D435_RPY).T @ (pm - np.array(p3.D435_XYZ)))]), CAL), CAL.color)[0]
+            if not (60 < uv[0] < 1220 and 60 < uv[1] < 660):
+                print(f"point {k}: the model's hand is outside the picture ({np.round(uv)}): skipped")
+                continue
             seen = seen_hand(torso_cloud(zz), pm, table_z)
             if seen is None:
                 print(f"point {k}: the camera does not see the hand near the model's")
@@ -130,7 +147,8 @@ def main(go):
     if results:
         r = np.array(results)
         print("mean offset", np.round(r.mean(axis=0), 3), "spread", np.round(r.std(axis=0), 3))
-        json.dump({"offsets": r.tolist()}, open("hand_eye.json", "w"))
+        with open("hand_eye.json", "w") as fh:
+            json.dump({"offsets": r.tolist()}, fh)
 
 
 if __name__ == "__main__":

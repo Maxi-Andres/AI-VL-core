@@ -103,3 +103,26 @@ def test_the_lift_goes_up_and_the_pre_grasp_stays_back():
     assert pos["lift"][2] - pos["grasp"][2] == pytest.approx(ik.LIFT_M, abs=0.01)
     back = np.asarray(plan["approach"]) @ (pos["grasp"] - pos["pre_grasp"])
     assert back == pytest.approx(ik.PRE_GRASP_M, abs=0.01)
+
+
+def test_the_way_up_keeps_the_arm_folded_by_the_body():
+    """The defect (2026-11-03): lifting the hand by swinging the arm out 74 degrees at the
+    shoulder with the wrist twisted. The posed way up keeps the upper arm in (roll small) and
+    the hand in front of the body, behind where a table edge is."""
+    for name in ("TUCK", "LIFT"):
+        q = getattr(ik, name)["right"]
+        assert abs(q[1]) < 0.35                       # shoulder roll: arm by the side
+        hand, _r, _j = ik.forward("right", q)
+        assert hand[0] < 0.30                         # in front of the body, not reached out
+
+
+def test_the_pre_grasp_keeps_the_fingertips_off_the_object():
+    """The defect (2026-11-03): the pre-grasp set from the grasp CENTRE, 10 cm short, while the
+    fingertips reach 10 cm past it — they knocked the bottle over. Measured from the fingertips,
+    they now stop TIP_CLEARANCE_M short of a 3.5 cm-radius object."""
+    plan = ik.plan_grasp("right", BOTTLE_GRASP, READY)
+    q = np.asarray(plan["poses"]["pre_grasp"])
+    tip, _r, _j = ik.forward("right", q, tool=(ik.TOOL["right"][0] + ik.FINGERTIP_M, 0.0, 0.0))
+    approach = np.asarray(plan["approach"])
+    short = approach @ (np.asarray(BOTTLE_GRASP) - tip)
+    assert short >= 0.035 + ik.TIP_CLEARANCE_M - 0.01

@@ -13,8 +13,7 @@ the legs, not how the robot leans.
 
 THE HAND IS NOT IN THE URDF. Ours are BrainCo Revo 2, and Unitree's file ends at a rubber hand's
 palm. Where the grasp centre sits — the point that must coincide with the object's axis when the
-fingers close — is TOOL, an ESTIMATE until it is measured (a held object located by the camera,
-see G1.md §6 fase 4). Every plan says so ("tool": "estimated"), like perception3d's "nominal".
+fingers close — is TOOL, measured with the head camera on 2026-11-03 (see TOOL).
 
 IK is damped least squares on the position (3), with the orientation (the finger direction and
 the palm normal) solved in what the position leaves free, seeded from the arm's measured pose so the answer is the nearest
@@ -77,11 +76,35 @@ LIMIT_MARGIN = 0.10
 FINGER_AXIS = np.array([1.0, 0.0, 0.0])
 PALM_NORMAL = {"right": np.array([0.0, 1.0, 0.0]), "left": np.array([0.0, -1.0, 0.0])}
 
-# The grasp centre in the wrist_yaw link: the URDF palm (0.0415 along the fingers) plus the
-# BrainCo's own length to the middle of its fingers, and out from the palm by a bottle's radius.
-# AN ESTIMATE (2026-11-03): measure it before trusting a grasp to the centimetre.
-TOOL = {"right": (0.10, 0.035, 0.0), "left": (0.10, -0.035, 0.0)}
+# The grasp centre in the wrist_yaw link — where the object's axis must be when the fingers close.
+# MEASURED 2026-11-03 with the head camera (the hand held still in view, its depth points
+# projected on the model's finger axis): the BrainCo runs from the wrist_yaw origin to ~0.24 m
+# along the fingers, and the model and camera agree on where it is. 0.14 along the fingers is
+# the middle of the palm; out from the palm by a bottle's radius plus the fingers' own thickness,
+# so the fingers pass beside the object instead of grazing it.
+TOOL = {"right": (0.14, 0.055, 0.0), "left": (0.14, -0.055, 0.0)}
+# How far past the grasp centre the fingertips reach, along the fingers: 0.24 - 0.14. The
+# pre-grasp is set from THIS, not from the centre — the first computed reach stopped its centre
+# 10 cm short and the fingertips, 14 cm further on, knocked the bottle over.
+FINGERTIP_M = 0.10
+TIP_CLEARANCE_M = 0.05
 
+# How much moving each joint "costs" the solver (shoulder pitch, roll, yaw, elbow, wrist x3).
+# Opening the shoulder sideways (roll) is the most expensive: left free, the solver lifted the
+# hand by swinging the arm out 74 degrees with the wrist twisted — it reached, but looked wrong
+# and swept a wide arc (2026-11-03, the user's sim screenshots). A person bends the elbow and
+# turns the forearm in; these costs make that the cheaper answer.
+JOINT_COST = np.array([1.5, 4.0, 1.0, 1.0, 1.5, 1.5, 1.5])
+
+# The way up, as joint postures (right arm; mirrored for the left), before the arm reaches out —
+# what the user posed from the Joints page on 2026-11-03 and the robot then ran: TUCK, the upper
+# arm back, the elbow at 90 degrees and the hand in front of the belly; LIFT, the forearm raised
+# from there and the wrist straightened, which clears the table edge. Postures, not hand points:
+# the point is that the ARM is folded, whatever the IK would pick to put the hand there.
+TUCK = {"right": np.array([0.573, -0.215, 0.044, -0.036, -0.055, -0.673, 0.773]),
+        "left": np.array([0.573, 0.215, -0.044, -0.036, 0.055, -0.673, -0.773])}
+LIFT = {"right": np.array([0.3, -0.215, 0.044, -0.6, 0.0, 0.0, 0.0]),
+        "left": np.array([0.3, 0.215, -0.044, -0.6, 0.0, 0.0, 0.0])}
 
 def load_tool(path=None):
     """{side: (x, y, z)} from a measured tool file, else TOOL; plus whether it was measured."""
@@ -171,7 +194,9 @@ def solve(side, target, seed, finger_dir=None, palm_dir=None, tool=None, iters=3
             if np.linalg.norm(ep) < tol * 0.1:
                 break
             jp, _jr = _jacobian(p, joints)
-            dq = jp.T @ np.linalg.solve(jp @ jp.T + damping ** 2 * np.eye(3), ep)
+            # Weighted least squares: each joint's step scaled down by its cost (JOINT_COST).
+            winv = np.diag(1.0 / JOINT_COST)
+            dq = winv @ jp.T @ np.linalg.solve(jp @ winv @ jp.T + damping ** 2 * np.eye(3), ep)
             q = np.clip(q + np.clip(dq, -0.15, 0.15), lo, hi)
         return q
 
@@ -239,7 +264,9 @@ def orientation_error_deg(side, q, finger_dir=None, palm_dir=None, tool=None):
 MAX_VEL = 0.5
 PLAN_VEL_FRACTION = 0.5
 MIN_SEGMENT_S = 1.5
-PRE_GRASP_M = 0.10       # the hand starts this far back along the approach
+# The hand starts this far back along the approach: fingertips TIP_CLEARANCE_M short of an
+# object of radius ~3.5 cm (see FINGERTIP_M).
+PRE_GRASP_M = FINGERTIP_M + 0.035 + TIP_CLEARANCE_M
 LIFT_M = 0.08
 
 
