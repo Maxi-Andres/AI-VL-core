@@ -258,6 +258,9 @@ def main(go):
                 print("back:", exc)
             finally:
                 alive.set()
+                # The hand stays folded after the release (the relay would put it back the way it
+                # was at take, open): the user wants it closed by the leg.
+                post({"op": "keep_hands", "session": session})
                 print("release:", post({"op": "release", "session": session}).get("ok"))
 
 
