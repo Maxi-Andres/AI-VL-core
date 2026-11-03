@@ -59,6 +59,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from PIL import Image
 from pydantic import BaseModel, Field
 
+import agent_common
 import asr_common
 import command_common
 import ear_common
@@ -688,6 +689,57 @@ def actions_cancel(action_id: str):
 @app.post("/actions/cancel")
 def actions_cancel_all():
     """STOP: every running action goes home and lets go."""
+    manipulation.cancel_all()
+    return {"ok": True}
+
+
+class AgentRequest(BaseModel):
+    text: str = Field(..., min_length=1, max_length=1000, description="the instruction")
+
+
+_AGENT = {"stop": None}
+
+
+@app.post("/agent")
+def agent(req: AgentRequest):
+    """Carry out an instruction with the robot (src/agent_common.py), streaming the trace as
+    Server-Sent Events, one JSON object per event the moment it happens: heard, understood,
+    plan, thought, tool, tool_event, tool_result, error, reply. MAY MOVE THE ROBOT (its tools
+    do). One run at a time (409 while one is going); POST /agent/stop is the STOP."""
+    import queue
+    if _AGENT["stop"] is not None:
+        return JSONResponse({"error": "the robot is already busy with an instruction"},
+                            status_code=409)
+    stop = threading.Event()
+    _AGENT["stop"] = stop
+    events: queue.Queue = queue.Queue()
+
+    def work():
+        try:
+            agent_common.run(req.text.strip(), events.put, stop=stop)
+        except Exception as e:                   # the trace says it
+            events.put({"type": "error", "text": f"{type(e).__name__}: {e}"})
+        finally:
+            _AGENT["stop"] = None
+            events.put(None)
+    threading.Thread(target=work, name="agent", daemon=True).start()
+
+    def gen():
+        while True:
+            ev = events.get()
+            if ev is None:
+                yield "event: end\ndata: {}\n\n"
+                return
+            yield f"data: {json.dumps(ev, ensure_ascii=False)}\n\n"
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+
+
+@app.post("/agent/stop")
+def agent_stop():
+    """STOP: the running instruction ends and any action takes the arm home and lets go."""
+    if _AGENT["stop"] is not None:
+        _AGENT["stop"].set()
     manipulation.cancel_all()
     return {"ok": True}
 

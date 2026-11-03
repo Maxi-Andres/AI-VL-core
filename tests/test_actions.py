@@ -73,3 +73,30 @@ def test_cancel_reaches_the_action(client):
 def test_an_empty_object_is_refused(client):
     c, _ = client
     assert c.post("/actions/pick", json={"object": ""}).status_code == 422
+
+
+def test_the_agent_streams_its_trace_as_server_sent_events(client, monkeypatch):
+    """The defect: the trace arriving all at once at the end, or not as one event per line."""
+    import json
+
+    import agent_common
+    c, _ = client
+
+    def fake_run(text, emit, stop=None):
+        emit({"type": "heard", "text": text})
+        emit({"type": "reply", "text": "Listo."})
+        return "Listo."
+    monkeypatch.setattr(agent_common, "run", fake_run)
+    with c.stream("POST", "/agent", json={"text": "agarrá la botella"}) as r:
+        assert r.headers["content-type"].startswith("text/event-stream")
+        body = "".join(r.iter_text())
+    data = [json.loads(ln[6:]) for ln in body.splitlines() if ln.startswith("data: {\"")]
+    assert [d["type"] for d in data] == ["heard", "reply"]
+    assert "event: end" in body
+
+
+def test_stop_cancels_every_action(client, monkeypatch):
+    c, _ = client
+    called = []
+    monkeypatch.setattr(manipulation, "cancel_all", lambda: called.append(True))
+    assert c.post("/agent/stop").json() == {"ok": True} and called
