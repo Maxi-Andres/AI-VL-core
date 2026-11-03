@@ -36,6 +36,7 @@ import locate_object as lo
 SIDE_M = 0.08            # the hand waits this far to the right of its grasp position
 WIDE_M = 0.18            # and comes down from above even further out
 LIFT_M = 0.08
+GRASP_AT = 0.4          # of the object's height, from the table
 # Fingers fully open, the thumb's rotation turned perpendicular to them (the value that held the
 # bottle on 2026-10-30): [thumb flex, thumb rotation, index, middle, ring, pinky], 0 open..1000.
 OPEN_WIDE = [0, 950, 0, 0, 0, 0]
@@ -89,7 +90,9 @@ def main(go):
     base, height, spread, edge_x, _frame = locate_three()
     table_z = float(base[2])
     up = np.array([0.0, 0.0, 1.0])
-    grasp = base + height / 2 * up
+    # The lower-middle of the object, not its middle: a bottle is widest there, and a box that
+    # reached past its cap (h 0.295 for a 0.23 bottle, 2026-11-03) then still lands on it.
+    grasp = base + GRASP_AT * height * up
     approach = ik.approach_direction("right", grasp)
     palm = np.cross(up, approach)                 # towards the bottle, from the hand's side
     beside = grasp - SIDE_M * palm
