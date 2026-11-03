@@ -248,3 +248,17 @@ def test_cancel_while_carrying_puts_it_back_where_it_was_first():
     fist = [i for i, o in enumerate(ex.ops) if o["op"] == "hand" and o.get("finger") == 2]
     assert fist[-1] > k, "the fist comes only after letting go"
     assert ex.verbs()[-1] == "release"
+
+
+def test_no_trajectory_asks_the_relay_for_more_than_its_speed_limit():
+    """The defect: speeding the way up and home (FREE_VEL) past what the relay passes: it
+    refuses the whole trajectory (validate_trajectory, 0.5 rad/s)."""
+    ex = FakeExecutor()
+    run(place(ex))
+    for tr in trajectories(ex):
+        prev_t, prev = 0.0, None
+        for pt in tr["points"]:
+            q = np.array(list(pt["q"].values()))
+            if prev is not None:
+                assert np.abs(q - prev).max() / (pt["t"] - prev_t) <= m.ik.MAX_VEL + 1e-9
+            prev_t, prev = pt["t"], q

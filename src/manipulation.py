@@ -68,7 +68,9 @@ OBJECT_GAP_M = 0.06      # the fingertips pass the object's axis no nearer on th
 HAND_TIP = 0.38          # the hand's far end along the fingers, pessimistic (see reach_stage1)
 HAND_TIP_CLOSED = 0.29   # the same, folded into a fist
 START_MAX_C = 60         # the right arm cool enough to start (it heats ~1 C/s held out)
-APPROACH_VEL = 0.4       # of the relay's max speed
+APPROACH_VEL = 0.4       # of the relay's max speed, near the object
+FREE_VEL = 0.85          # and away from it: the way up and home (23 s each at 0.4, 2026-11-03)
+MIN_SEGMENT_S = 1.2      # no segment shorter, however small
 GRASP_WAIT_S = 6.0
 # Placing (see plan_place).
 CARRY_CLEAR_M = 0.06     # the carried object's bottom passes this far above the target's top
@@ -461,11 +463,11 @@ class PickAction:
         self._hand({0: FIST[0], 1: FIST[1]})                 # ... then the thumb
         time.sleep(1.0)
 
-    def _move(self, q_from, poses, vel=0.4, what="moving"):
+    def _move(self, q_from, poses, vel=FREE_VEL, what="moving"):
         pts, t, prev = [], 0.0, q_from
         names = ik.joint_names(SIDE)
         for q in poses:
-            t += max(2.0, float(np.abs(q - prev).max()) / (ik.MAX_VEL * vel))
+            t += max(MIN_SEGMENT_S, float(np.abs(q - prev).max()) / (ik.MAX_VEL * vel))
             pts.append({"t": round(t, 2),
                         "q": {n: round(float(v), 4) for n, v in zip(names, q, strict=True)}})
             prev = q
@@ -488,7 +490,7 @@ class PickAction:
                 raise ActionError(f"{what}: {tr.get('state')} ({tr.get('reason')})")
             return
 
-    def _go(self, poses, vel=0.4, what="moving"):
+    def _go(self, poses, vel=FREE_VEL, what="moving"):
         """A move from the last pose of the trail, which it then extends."""
         self._move(self._trail[-1], poses, vel=vel, what=what)
         self._trail.extend(poses)
@@ -553,7 +555,7 @@ class PickAction:
             time.sleep(1.0)
             self._hand(OPEN_WIDE)
             time.sleep(1.5)
-            self._go([plan.beside], what="coming beside it")
+            self._go([plan.beside], vel=APPROACH_VEL, what="coming beside it")
             self._check()
             self.emit("reaching in")
             self._go([plan.grasp], vel=APPROACH_VEL, what="reaching in")
