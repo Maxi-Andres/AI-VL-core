@@ -66,22 +66,36 @@ def locate_three():
     # the table: its top around the base height, and its near edge in front of the robot
     pts = p3.depth_points(z, cal.depth, step=2)
     T = (p3.rpy_matrix(*p3.D435_RPY) @ (p3.OPTICAL_TO_LINK @ pts.T)).T + np.array(p3.D435_XYZ)
-    top = T[(np.abs(T[:, 2] - base[2]) < 0.015) & (np.abs(T[:, 1] - base[1]) < 0.25)]
+    # The edge where the RIGHT arm passes: from the bottle to ~22 cm to its right. The table can
+    # sit at an angle to the robot (2026-11-03: its edge 4 cm nearer on the far left), and the
+    # nearest edge anywhere refused a path that never goes there.
+    top = T[(np.abs(T[:, 2] - base[2]) < 0.015) & (T[:, 1] < base[1] + 0.03)
+            & (T[:, 1] > base[1] - 0.22)]
     edge_x = float(np.percentile(top[:, 0], 2))
     return base, height, spread, edge_x, frame
 
 
-def arm_points(q):
-    """Elbow, wrist and hand positions (torso frame) for a pose."""
+# The fingertips along the fingers from the wrist_yaw origin, PESSIMISTIC: the ~8 cm the hand
+# lands past the model counted as hand length. Assuming it was not (0.30) let the fingers touch
+# the desk on the way up (2026-11-03).
+HAND_TIP = 0.38
+# The same, with the hand folded into a fist (the knuckles are its far end): shorter by most of
+# the fingers' length.
+HAND_TIP_CLOSED = 0.29
+
+
+def arm_points(q, tip=HAND_TIP):
+    """Elbow, wrist, grasp point and the hand's far end (torso frame) for a pose."""
     p, _rot, joints = ik.forward("right", q)
-    return [joints[3][0], joints[4][0], joints[6][0], p]
+    tips = ik.forward("right", q, tool=(tip, 0.0, 0.0))[0]
+    return [joints[3][0], joints[4][0], joints[6][0], p, tips]
 
 
-def check_path(segments, table_z, edge_x):
+def check_path(segments, table_z, edge_x, tip=HAND_TIP):
     worst = np.inf
     for qa, qb in segments:
         for s in np.linspace(0, 1, 25):
-            for pt in arm_points(qa + s * (qb - qa)):
+            for pt in arm_points(qa + s * (qb - qa), tip):
                 if pt[0] > edge_x - 0.05:
                     worst = min(worst, pt[2] - table_z)
     return worst

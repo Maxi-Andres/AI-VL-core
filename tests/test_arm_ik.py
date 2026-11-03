@@ -112,8 +112,8 @@ def test_the_way_up_keeps_the_arm_folded_by_the_body():
     for name in ("TUCK", "LIFT"):
         q = getattr(ik, name)["right"]
         assert abs(q[1]) < 0.35                       # shoulder roll: arm by the side
-        hand, _r, _j = ik.forward("right", q)
-        assert hand[0] < 0.30                         # in front of the body, not reached out
+        _p, _r, joints = ik.forward("right", q)
+        assert joints[6][0][0] < 0.25                 # the wrist in front of the body, not out
 
 
 def test_the_pre_grasp_keeps_the_fingertips_off_the_object():

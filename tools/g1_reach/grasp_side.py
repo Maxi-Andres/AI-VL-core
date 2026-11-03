@@ -7,6 +7,7 @@ way. The hand is never changed while the arm moves.
     python grasp_side.py --go       # and move
 """
 import itertools
+import json
 import sys
 import threading
 import time
@@ -17,12 +18,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import cv2
 import numpy as np
-from reach_stage1 import CLEAR_M, check_path, locate_three, measured_q, post, run_trajectory, timed
+from reach_stage1 import (
+    CLEAR_M,
+    HAND_TIP,
+    HAND_TIP_CLOSED,
+    check_path,
+    locate_three,
+    measured_q,
+    post,
+    run_trajectory,
+    timed,
+)
 
 import arm_ik as ik
 import locate_object as lo
 
 SIDE_M = 0.08            # the hand waits this far to the right of its grasp position
+WIDE_M = 0.18            # and comes down from above even further out
 LIFT_M = 0.08
 # Fingers fully open, the thumb's rotation turned perpendicular to them (the value that held the
 # bottle on 2026-10-30): [thumb flex, thumb rotation, index, middle, ring, pinky], 0 open..1000.
@@ -43,8 +55,15 @@ def arm_temp():
     return 0
 
 
+# Folded small for the way up, AS THE USER SET IT from the Joints page (2026-11-03): the four
+# fingers closed, the thumb bent and turned in — [thumb flex, thumb rotation, index, middle,
+# ring, pinky]. Set with the arm still, before it moves.
+FIST = [600, 800, 899, 899, 899, 899]
+
+
 def set_hand(session, fingers):
-    for k, pos in enumerate(fingers):
+    items = fingers.items() if isinstance(fingers, dict) else enumerate(fingers)
+    for k, pos in items:
         out = post({"op": "hand", "session": session, "side": "right", "finger": k, "pos": pos})
         if not out.get("ok"):
             raise RuntimeError(f"hand finger {k} refused: {out}")
@@ -75,17 +94,49 @@ def main(go):
     palm = np.cross(up, approach)                 # towards the bottle, from the hand's side
     beside = grasp - SIDE_M * palm
     lifted = grasp + LIFT_M * up
-    tuck, lift = ik.TUCK["right"], ik.LIFT["right"]
-    q_beside = ik.solve("right", beside, lift, finger_dir=approach, palm_dir=palm)
+    # The way up is the user's, taught from the Joints page (taught_poses.json): every posture
+    # seen on the robot with nothing touched. The IK only plans from the last one, `ready`.
+    taught = {p["name"]: np.array([p["q"][n] for n in ik.joint_names("right")])
+              for p in json.loads(Path(__file__).with_name("taught_poses.json").read_text())}
+    way_up = [taught[n] for n in ("way_up_2", "way_up_3", "way_up_4", "ready")]
+    raised = taught["ready"]
+    # Down from RAISED well to the right of the bottle first, then in beside it: straight from
+    # RAISED the (long) fingertips swept within 2.4 cm of its axis.
+    wide = grasp - WIDE_M * palm + np.array([0.0, 0.0, 0.05])
+    # From `ready` the wrist first straightens where the hand is (near the body), then the IK
+    # takes over from a straight-wristed seed: seeded from the taught, wrist-turned posture the
+    # whole approach inherited a 30-degree turn of the palm.
+    # The wrist straightens with the forearm raised further: straightened at `ready`, the fist
+    # pointed out over the table edge 1 cm above it.
+    straight = raised.copy()
+    straight[3] = -0.6
+    straight[4:] = (0.0, -0.3, 0.0)
+    q_wide = ik.solve("right", wide, ik.LIFT["right"], finger_dir=approach, palm_dir=palm)
+    q_beside = ik.solve("right", beside, q_wide, finger_dir=approach, palm_dir=palm)
     q_grasp = ik.solve("right", grasp, q_beside, finger_dir=approach, palm_dir=palm)
     q_lifted = ik.solve("right", lifted, q_grasp, finger_dir=approach, palm_dir=palm)
-    path = [q0, tuck, lift, q_beside, q_grasp, q_lifted]
-    clear = min(check_path([(a, b)], table_z, edge_x - 0.10) for a, b in itertools.pairwise(path))
+    path = [q0, *way_up, straight, q_wide, q_beside, q_grasp, q_lifted]
+    # Past the real edge less 3 cm counts (check_path takes 5 off what it is given).
+    names = ["hang", "up2", "up3", "up4", "ready", "straight", "wide", "beside", "grasp", "lifted"]
+    # The hand is a fist up to `wide` (FIST), open from there on.
+    per = [check_path([(a, b)], table_z, edge_x + 0.02,
+                      tip=HAND_TIP_CLOSED if k < 6 else HAND_TIP)
+           for k, (a, b) in enumerate(itertools.pairwise(path))]
+    # The relay's own retreat, straight from wherever the arm is to `ready` (the safe pose).
+    retreat = min(check_path([(q, straight)], table_z, edge_x + 0.02)
+                  for q in (q_wide, q_beside, q_grasp, q_lifted))
+    print(f"relay retreat to the safe pose: {retreat * 100:.1f} cm" if retreat != np.inf
+          else "relay retreat to the safe pose: clear")
+    print("table margin per segment:", ", ".join(
+        f"{names[k]}->{names[k + 1]} {'ok' if c == np.inf else f'{c * 100:.1f}cm'}"
+        for k, c in enumerate(per)))
+    clear = min([*per, retreat])
     # The fingertips on the way in must pass the bottle by its side, never through it. They are
     # in the palm's plane, on the finger axis — not out by TOOL's offset from the palm.
     tip_tool = (ik.TOOL["right"][0] + ik.FINGERTIP_M, 0.0, 0.0)
-    gap = min(np.linalg.norm((ik.forward("right", lift + s * (q_beside - lift), tool=tip_tool)[0]
-                              - base)[:2]) for s in np.linspace(0, 1, 30))
+    gap = min(np.linalg.norm((ik.forward("right", qa + s * (qb - qa), tool=tip_tool)[0]
+                              - base)[:2]) for qa, qb in ((straight, q_wide), (q_wide, q_beside))
+              for s in np.linspace(0, 1, 30))
     print(f"bottle {np.round(base, 3)} h {height:.3f} (3 within {spread * 100:.1f} cm); "
           f"table {table_z:.3f}, edge {edge_x:.3f}")
     for name, q, target in (("beside", q_beside, beside), ("grasp", q_grasp, grasp),
@@ -105,7 +156,7 @@ def main(go):
     # The safe pose: the relay takes the arm back there before any release (warm joint, lost
     # client, release asked) instead of dropping it onto the table.
     took = post({"op": "take", "safe": dict(zip(ik.joint_names("right"),
-                                                 [round(float(v), 4) for v in tuck],
+                                                 [round(float(v), 4) for v in straight],
                                                  strict=True))})
     if not took.get("ok"):
         raise SystemExit(f"take refused: {took}")
@@ -121,19 +172,21 @@ def main(go):
     threading.Thread(target=keepalive, daemon=True).start()
     held = False
     try:
-        tr = run_trajectory(session, timed(q0, [tuck, lift]))
-        print("to lift:", tr.get("state"), tr.get("error_rad"))
+        set_hand(session, FIST)                   # arm still: fold the hand small first
+        time.sleep(1.5)
+        tr = run_trajectory(session, timed(q0, [*way_up, straight, q_wide]))
+        print("to wide:", tr.get("state"), tr.get("reason"), tr.get("error_rad"))
         if tr.get("state") != "success":
             return
-        # The hand opens HERE, the arm still and far from the bottle: opened beside it, the
-        # thumb's turn swept the bottle away (user, 2026-11-03). Fingers and thumb straight
-        # first, the thumb up; only then is it turned perpendicular.
+        # The hand opens HERE, the arm still and 18 cm from the bottle: fingers and thumb straight
+        # first, then the thumb turned perpendicular (opened beside the bottle, the thumb's turn
+        # swept it away).
         set_hand(session, [0, 0, 0, 0, 0, 0])
         time.sleep(1.0)
         set_hand(session, OPEN_WIDE)
         time.sleep(1.5)
-        tr = run_trajectory(session, timed(lift, [q_beside]))
-        print("to beside:", tr.get("state"), tr.get("error_rad"))
+        tr = run_trajectory(session, timed(q_wide, [q_beside]))
+        print("to beside:", tr.get("state"), tr.get("reason"), tr.get("error_rad"))
         if tr.get("state") != "success":
             return
         cv2.imwrite("grasp_beside_open.jpg", lo.grab_color())
@@ -150,7 +203,7 @@ def main(go):
             np.save("slid_in_q.npy", measured_q())
             np.save("slid_in_plan.npy", np.concatenate([base, [height], grasp]))
             print("measured; backing out without a grasp")
-            print("slide out:", run_trajectory(session, timed(q_grasp, [q_beside],
+            print("slide out:", run_trajectory(session, timed(q_grasp, [q_beside, q_wide],
                                                               vel_fraction=APPROACH_VEL)).get("state"))
             return
         print("grasp:", post({"op": "grasp", "session": session, "side": "right",
@@ -169,7 +222,7 @@ def main(go):
                                                              vel_fraction=APPROACH_VEL)).get("state"))
         print("open:", post({"op": "open", "session": session, "side": "right"}).get("ok"))
         time.sleep(1.5)
-        print("slide out:", run_trajectory(session, timed(q_grasp, [q_beside],
+        print("slide out:", run_trajectory(session, timed(q_grasp, [q_beside, q_wide],
                                                           vel_fraction=APPROACH_VEL)).get("state"))
     finally:
         # The relay may already be taking the arm to the safe pose (a warm joint): then it
@@ -181,7 +234,7 @@ def main(go):
         else:
             try:
                 cur = measured_q()
-                print("back:", run_trajectory(session, timed(cur, [lift, tuck, q0])).get("state"))
+                print("back:", run_trajectory(session, timed(cur, [q_wide, straight, *way_up[::-1], q0])).get("state"))
             except RuntimeError as exc:
                 print("back:", exc)
             finally:

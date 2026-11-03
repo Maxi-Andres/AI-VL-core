@@ -76,17 +76,17 @@ LIMIT_MARGIN = 0.10
 FINGER_AXIS = np.array([1.0, 0.0, 0.0])
 PALM_NORMAL = {"right": np.array([0.0, 1.0, 0.0]), "left": np.array([0.0, -1.0, 0.0])}
 
-# The grasp centre in the wrist_yaw link — where the object's axis must be when the fingers close.
-# MEASURED 2026-11-03 with the head camera (the hand held still in view, its depth points in the
-# link frame): the BrainCo reaches ~0.24 m along the fingers from the wrist_yaw origin and its
-# palm face is ~0.015 m out on +y; camera and model agree on where the hand is. The centre is
-# the middle of the PALM, ~0.09 along (palm ~0.04-0.13, fingers beyond) — not the middle of the
-# whole hand: at 0.14 the bottle landed at the base of the fingers, against the thumb, and the
-# user saw the hand "too far forward" twice. Out from the palm face by a bottle's radius.
-TOOL = {"right": (0.09, 0.05, 0.0), "left": (0.09, -0.05, 0.0)}
-# How far past the grasp centre the fingertips reach, along the fingers: 0.24 - 0.09. The
-# pre-grasp is set from THIS, not from the centre — the first computed reach stopped its centre
-# 10 cm short and the fingertips, further on, knocked the bottle over.
+# The grasp centre in the wrist_yaw link — the point the IK puts on the object's axis.
+# EMPIRICAL (2026-11-03), from where the bottle actually ended up, frame by frame in the
+# recording: with this at 0.14 along the fingers the bottle met the thumb (~0.05 from the
+# wrist); at 0.09 it met the wrist itself — the hand lands ~8 cm further on than the model
+# says, whether the arm or the bottle's location carries it. A larger value pulls the hand
+# BACK (it was moved the wrong way once). 0.21 puts the bottle at the palm's middle, and out
+# from the palm by a bottle's radius (0.05 left the hand too far to the right).
+TOOL = {"right": (0.21, 0.035, 0.0), "left": (0.21, -0.035, 0.0)}
+# How far past the grasp centre the fingertips reach, along the fingers. The pre-grasp is set
+# from THIS: the first computed reach stopped its centre 10 cm short and the fingertips,
+# further on, knocked the bottle over.
 FINGERTIP_M = 0.15
 TIP_CLEARANCE_M = 0.05
 
@@ -104,8 +104,35 @@ JOINT_COST = np.array([1.5, 4.0, 1.0, 1.0, 1.5, 1.5, 1.5])
 # the point is that the ARM is folded, whatever the IK would pick to put the hand there.
 TUCK = {"right": np.array([0.573, -0.215, 0.044, -0.036, -0.055, -0.673, 0.773]),
         "left": np.array([0.573, 0.215, -0.044, -0.036, 0.055, -0.673, -0.773])}
-LIFT = {"right": np.array([0.3, -0.215, 0.044, -0.6, 0.0, 0.0, 0.0]),
-        "left": np.array([0.3, 0.215, -0.044, -0.6, 0.0, 0.0, 0.0])}
+# LIFT keeps the wrist a little bent (-0.3): straight, the fingertips passed the table edge
+# 4.0 cm above it; bent, 4.8.
+LIFT = {"right": np.array([0.3, -0.215, 0.044, -0.6, 0.0, -0.3, 0.0]),
+        "left": np.array([0.3, 0.215, -0.044, -0.6, 0.0, -0.3, 0.0])}
+
+
+# The way up close to the body (2026-11-03, after the fingers touched a desk the robot stood
+# near): the upper arm swung well BACK first, the forearm still hanging, so the hand moves
+# away from the table; then the elbow and wrist fold and the hand rises in front of the chest,
+# ~9 cm ahead of the torso, fingertips well above any table — even counting the hand ~8 cm
+# longer than the model. RAISED is also the safe pose a session hands the relay.
+RAISED = {"right": np.array([1.0, -0.215, 0.044, -0.4, -0.055, -1.4, 0.773]),
+          "left": np.array([1.0, 0.215, -0.044, -0.4, 0.055, -1.4, -0.773])}
+
+
+def arm_back(side, q_hanging):
+    """The hanging arm with the upper arm swung back as in RAISED, the forearm still down."""
+    q = np.asarray(q_hanging, dtype=np.float64).copy()
+    q[:3] = RAISED[side][:3]
+    return q
+
+
+def fold_first(side, q_hanging):
+    """The hanging arm with the wrist already folded as in TUCK: going there FIRST, the
+    forearm then rises with the fingers turned in. Raised with everything at once, the fingertips
+    swept forward under the table edge (2026-11-03, the robot close to a desk)."""
+    q = np.asarray(q_hanging, dtype=np.float64).copy()
+    q[4:] = TUCK[side][4:]
+    return q
 
 def load_tool(path=None):
     """{side: (x, y, z)} from a measured tool file, else TOOL; plus whether it was measured."""
