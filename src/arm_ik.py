@@ -77,16 +77,17 @@ FINGER_AXIS = np.array([1.0, 0.0, 0.0])
 PALM_NORMAL = {"right": np.array([0.0, 1.0, 0.0]), "left": np.array([0.0, -1.0, 0.0])}
 
 # The grasp centre in the wrist_yaw link — where the object's axis must be when the fingers close.
-# MEASURED 2026-11-03 with the head camera (the hand held still in view, its depth points
-# projected on the model's finger axis): the BrainCo runs from the wrist_yaw origin to ~0.24 m
-# along the fingers, and the model and camera agree on where it is. 0.14 along the fingers is
-# the middle of the palm; out from the palm by a bottle's radius plus the fingers' own thickness,
-# so the fingers pass beside the object instead of grazing it.
-TOOL = {"right": (0.14, 0.055, 0.0), "left": (0.14, -0.055, 0.0)}
-# How far past the grasp centre the fingertips reach, along the fingers: 0.24 - 0.14. The
+# MEASURED 2026-11-03 with the head camera (the hand held still in view, its depth points in the
+# link frame): the BrainCo reaches ~0.24 m along the fingers from the wrist_yaw origin and its
+# palm face is ~0.015 m out on +y; camera and model agree on where the hand is. The centre is
+# the middle of the PALM, ~0.09 along (palm ~0.04-0.13, fingers beyond) — not the middle of the
+# whole hand: at 0.14 the bottle landed at the base of the fingers, against the thumb, and the
+# user saw the hand "too far forward" twice. Out from the palm face by a bottle's radius.
+TOOL = {"right": (0.09, 0.05, 0.0), "left": (0.09, -0.05, 0.0)}
+# How far past the grasp centre the fingertips reach, along the fingers: 0.24 - 0.09. The
 # pre-grasp is set from THIS, not from the centre — the first computed reach stopped its centre
-# 10 cm short and the fingertips, 14 cm further on, knocked the bottle over.
-FINGERTIP_M = 0.10
+# 10 cm short and the fingertips, further on, knocked the bottle over.
+FINGERTIP_M = 0.15
 TIP_CLEARANCE_M = 0.05
 
 # How much moving each joint "costs" the solver (shoulder pitch, roll, yaw, elbow, wrist x3).
