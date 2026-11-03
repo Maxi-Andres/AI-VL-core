@@ -33,7 +33,7 @@ def main(name):
     data.append({"name": name, "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                  "q": dict(zip(names, [round(float(v), 4) for v in q], strict=True)),
                  "hand": d.get("right")})
-    path.write_text(json.dumps(data, indent=1))
+    path.write_text(json.dumps(data, indent=1) + "\n")
     print(f"saved as {name}")
 
 
