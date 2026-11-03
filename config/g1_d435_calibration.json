@@ -1,0 +1,12 @@
+{
+  "depth": {"width": 848, "height": 480, "fx": 426.0241, "fy": 426.0241, "ppx": 417.9571, "ppy": 240.1665},
+  "color": {"width": 1280, "height": 720, "fx": 908.3154, "fy": 909.2698, "ppx": 646.9604, "ppy": 362.2353},
+  "depth_to_color": {
+    "rotation": [0.999937, 0.011257, 0.000541, -0.011255, 0.999932, -0.003062, -0.000576, 0.003056, 0.999995],
+    "translation": [0.014985, -9.7e-05, 0.000686]
+  },
+  "read_with": "librealsense",
+  "host": "G1 PC2 (ubuntu)",
+  "date": "2026-11-03",
+  "note": "The G1 head D435i's factory calibration, read by robot-video-pipeline/robot/realsense_calib.py. Per camera: re-read it if the camera is replaced."
+}
