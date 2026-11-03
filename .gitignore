@@ -12,6 +12,8 @@ results/*.log
 
 # Annotated (boxed) images saved by the YOLO scan
 results/annotated/
+# locate_object.py: the picture of every locate (src/locate_object.py)
+results/locate/
 
 # YOLO weights (auto-downloaded by ultralytics on first use)
 *.pt
