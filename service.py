@@ -63,6 +63,7 @@ import asr_common
 import command_common
 import ear_common
 import keep_common
+import manipulation
 import search_common
 import tts_common
 import turn_common
@@ -642,6 +643,53 @@ def skills(robot: str = Query(None)):
         **command_common.catalog(robot or command_common.DEFAULT_ROBOT),
         "robots": command_common.list_robots(),
     }
+
+
+class PickRequest(BaseModel):
+    object: str = Field(..., min_length=1, max_length=120,
+                        description="what to pick up, in words: 'the bottle', 'the red cup'")
+    classes: list[str] = Field(default=["bottle", "cup"],
+                               description="YOLO class names that may be it ([] = the VLM alone)")
+
+
+@app.post("/actions/pick")
+def actions_pick(req: PickRequest):
+    """Start picking up `object`: lift it, put it back, go home (src/manipulation.py). Answers
+    at once with the action's id; GET /actions/{id} follows it step by step. MOVES THE ROBOT
+    through the executor; one action at a time (409 if one is running)."""
+    try:
+        act = manipulation.start_pick(req.object.strip(), locate_fn=lambda p: manipulation.locate(
+            p, classes=tuple(req.classes)))
+    except manipulation.ActionError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    return act.snapshot()
+
+
+@app.get("/actions/{action_id}")
+def actions_get(action_id: str, since: int = Query(0, ge=0)):
+    """An action's state, its step now and its events from index `since` (poll with the count
+    already seen)."""
+    act = manipulation.get(action_id)
+    if act is None:
+        return JSONResponse({"error": "no such action"}, status_code=404)
+    return act.snapshot(since)
+
+
+@app.post("/actions/{action_id}/cancel")
+def actions_cancel(action_id: str):
+    """Stop an action: the arm goes home the way it went out, then is released."""
+    act = manipulation.get(action_id)
+    if act is None:
+        return JSONResponse({"error": "no such action"}, status_code=404)
+    act.cancel()
+    return act.snapshot()
+
+
+@app.post("/actions/cancel")
+def actions_cancel_all():
+    """STOP: every running action goes home and lets go."""
+    manipulation.cancel_all()
+    return {"ok": True}
 
 
 @app.get("/tts/voices")
