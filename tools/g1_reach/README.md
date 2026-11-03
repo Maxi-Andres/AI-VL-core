@@ -14,3 +14,15 @@ Field scripts, not library code: they move the real right arm through the execut
   take the table height from the located bottle (as `reach_stage1.py` does), not a histogram.
 
 Lesson from the user: on the way up the hand must stay closer to the body.
+
+## First full grasp (2026-11-03, `grasp_side.py`)
+
+Lifted the bottle and put it back. The way up is TAUGHT (`taught_poses.json`, from
+`capture_pose.py <name>` while the user holds the arm in the Joints page): hanging -> way_up_2
+(wrist folded in) -> way_up_3 -> way_up_4 (forearm level, hand before the belly) -> ready, the
+hand folded as the user set it (FIST). From there the planner straightens the wrist with the
+forearm raised (also the relay's safe pose), the IK goes to the bottle's right, the hand opens
+with the arm still, slides in, closes by touch, lifts, puts it down, lets go, and returns the
+same way. Every segment is checked against the table edge where the right arm passes and
+against the bottle, with a pessimistic hand (fist while folded), and so is the relay's straight
+retreat to the safe pose. What failed on the way there, and why: see the commits of that day.

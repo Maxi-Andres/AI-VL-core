@@ -3,3 +3,5 @@
 *.npy
 *.json
 *.mp4
+# The postures the user taught from the Joints page: the way up the grasp uses. Kept.
+!taught_poses.json
