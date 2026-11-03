@@ -62,6 +62,15 @@ def arm_temp():
 FIST = [600, 800, 899, 899, 899, 899]
 
 
+def set_fist(session):
+    """FIST, the four fingers first and the thumb only once they are closed: the thumb closing
+    first pressed on the index (the user, 2026-11-03)."""
+    set_hand(session, {k: FIST[k] for k in (2, 3, 4, 5)})
+    time.sleep(1.0)
+    set_hand(session, {0: FIST[0], 1: FIST[1]})
+    time.sleep(1.0)
+
+
 def set_hand(session, fingers):
     items = fingers.items() if isinstance(fingers, dict) else enumerate(fingers)
     for k, pos in items:
@@ -175,8 +184,7 @@ def main(go):
     threading.Thread(target=keepalive, daemon=True).start()
     held = False
     try:
-        set_hand(session, FIST)                   # arm still: fold the hand small first
-        time.sleep(1.5)
+        set_fist(session)                         # arm still: fold the hand small first
         tr = run_trajectory(session, timed(q0, [*way_up, straight, q_wide]))
         print("to wide:", tr.get("state"), tr.get("reason"), tr.get("error_rad"))
         if tr.get("state") != "success":
@@ -209,6 +217,11 @@ def main(go):
             print("slide out:", run_trajectory(session, timed(q_grasp, [q_beside, q_wide],
                                                               vel_fraction=APPROACH_VEL)).get("state"))
             return
+        # The four fingers first, the thumb after (the user, 2026-11-03): in position mode each
+        # finger stops where it meets the bottle; then the grasp by touch closes the thumb's flex
+        # and squeezes with whatever touches. The thumb's rotation stays where it is.
+        set_hand(session, {2: 1000, 3: 1000, 4: 1000, 5: 1000})
+        time.sleep(1.2)
         print("grasp:", post({"op": "grasp", "session": session, "side": "right",
                               "thumb": OPEN_WIDE[1]}).get("ok"))
         state, forces = wait_grasp(session)
@@ -239,8 +252,7 @@ def main(go):
                 cur = measured_q()
                 # Folded as the user showed before going home, the arm still and away from the
                 # bottle (at `wide`, where the slide out ended).
-                set_hand(session, FIST)
-                time.sleep(1.5)
+                set_fist(session)
                 print("back:", run_trajectory(session, timed(cur, [q_wide, straight, *way_up[::-1], q0])).get("state"))
             except RuntimeError as exc:
                 print("back:", exc)
