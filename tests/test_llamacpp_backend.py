@@ -9,6 +9,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import command_common as cc
@@ -131,7 +133,28 @@ def test_objects_that_are_not_objects_do_not_crash_bbox_normalization():
     """Catches: "objects": ["person", ...] (valid JSON, wrong shape — qwen3-vl 4B Q8 answered
     that on 2026-10-16) raising AttributeError, a 500 on /vlm whichever server answered."""
     parsed = {"objects": ["person", {"bbox": [10, 20, 30, 40]}, None]}
-    vc.normalize_bboxes(parsed, (100, 200))
+    vc.normalize_bboxes(parsed, (100, 200), "qwen2.5vl:7b")
     assert parsed["objects"][0] == "person"
     assert parsed["objects"][1]["bbox"] == [0.1, 0.1, 0.3, 0.2]
     assert vc.normalize_bboxes({"objects": "none"}, (100, 200)) == {"objects": "none"}
+
+
+@pytest.mark.parametrize("model", ["qwen3vl-4b-q4", "qwen3-vl:4b-instruct", None])
+def test_qwen3_boxes_are_per_mille_whatever_the_image_size(model):
+    """The defect (measured 2026-11-03): Qwen3-VL's [237, 346, 518, 860] on an 854x1280 photo
+    divided by the PIXEL size — every box drawn 15-22% off. Qwen3-VL answers 0..1000."""
+    parsed = {"objects": [{"bbox": [237, 346, 518, 860]}]}
+    vc.normalize_bboxes(parsed, (854, 1280), model)
+    assert parsed["objects"][0]["bbox"] == [0.237, 0.346, 0.518, 0.86]
+
+
+def test_a_per_mille_box_past_the_edge_is_clamped_not_left_over_one():
+    parsed = {"objects": [{"bbox": [706, 189, 875, 1004]}]}
+    vc.normalize_bboxes(parsed, None, "qwen3vl-4b-q4")
+    assert parsed["objects"][0]["bbox"] == [0.706, 0.189, 0.875, 1.0]
+
+
+def test_qwen25_boxes_are_still_pixels():
+    assert vc.bbox_scale("qwen2.5vl:7b") == "pixels"
+    assert vc.bbox_scale("Qwen2_5-VL-7B") == "pixels"
+    assert vc.bbox_scale("qwen3vl-4b-q4") == "1000"

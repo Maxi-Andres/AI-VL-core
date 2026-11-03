@@ -562,8 +562,9 @@ def image_size(path):
 
     Fast path reads the JPEG/PNG header with no extra dependencies; for the other
     formats in IMG_EXTS (bmp/webp) — or any header we fail to parse — it falls back
-    to PIL. qwen3-vl returns the bbox in absolute pixels of the file, so we need the
-    dimensions to normalize them to 0..1 (a missing size leaves bboxes un-normalized).
+    to PIL. qwen2.5-vl returns the bbox in absolute pixels of the file, so the dimensions
+    are needed to normalize them to 0..1 (a missing size leaves its bboxes un-normalized).
+    qwen3-vl does not: see bbox_scale().
     """
     try:
         with open(path, "rb") as f:
@@ -599,16 +600,35 @@ def image_size(path):
         return None
 
 
-def normalize_bboxes(parsed, size):
-    """If the bbox come in pixels (any value > 1), convert them to 0..1 in-place.
+def bbox_scale(model):
+    """What the numbers in a VLM's bbox are: "pixels" or "1000" (0..1000 of each side).
 
-    `size` is (width, height). If it is None or the bbox is already normalized, leaves it alone.
+    Qwen2.5-VL answers in absolute pixels of the file. Qwen3-VL answers in 0..1000 of each
+    side, WHATEVER the prompt asks and whatever the image's size — MEASURED 2026-11-03 with
+    the app's own detection prompt, which asks for 0..1: on an 854x1280 photo it gave
+    [237, 346, 518, 860] where YOLO's box is [241, 345, 519, 864] per mille; on a 1280x960 one,
+    a y of 998. Dividing those by the pixel size (what this did until then) shifted boxes by
+    15-22%. Qwen3-VL is the default, so anything not recognisably Qwen2.5 is read as 0..1000.
     """
-    if not isinstance(parsed, dict) or not size:
+    name = (model or "").lower().replace("_", ".")
+    return "pixels" if "qwen2.5" in name else "1000"
+
+
+def normalize_bboxes(parsed, size, model=None):
+    """If the bbox come un-normalized (any value > 1), convert them to 0..1 in-place.
+
+    `size` is (width, height), needed only for a model that answers in pixels (bbox_scale).
+    If the bbox is already normalized, or a pixel answer has no size, leaves it alone.
+    """
+    if not isinstance(parsed, dict):
         return parsed
-    w, h = size
-    if not w or not h:
-        return parsed
+    per_mille = bbox_scale(model) == "1000"
+    if not per_mille:
+        if not size or not size[0] or not size[1]:
+            return parsed
+        w, h = size
+    else:
+        w = h = 1000
     objects = parsed.get("objects")
     # Valid JSON is not the contract: a model has answered "objects": ["person", ...]
     # (qwen3-vl 4B Q8, 2026-10-16), which crashed here with a 500 on /vlm.
@@ -619,8 +639,10 @@ def normalize_bboxes(parsed, size):
         if (isinstance(bb, list) and len(bb) == 4
                 and all(isinstance(v, (int, float)) for v in bb)
                 and any(v > 1.0 for v in bb)):
-            obj["bbox"] = [round(bb[0] / w, 4), round(bb[1] / h, 4),
-                           round(bb[2] / w, 4), round(bb[3] / h, 4)]
+            obj["bbox"] = [round(min(max(bb[0] / w, 0.0), 1.0), 4),
+                           round(min(max(bb[1] / h, 0.0), 1.0), 4),
+                           round(min(max(bb[2] / w, 0.0), 1.0), 4),
+                           round(min(max(bb[3] / h, 0.0), 1.0), 4)]
     return parsed
 
 
@@ -1109,7 +1131,7 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
         the image more resolution and more room to reason + answer;
       - max_tokens (num_predict) = OUTPUT token ceiling (includes the thinking).
 
-    `size` (width, height) is used to normalize the bbox to 0..1.
+    `size` (width, height) is used to normalize a pixel bbox to 0..1 (see bbox_scale).
 
     The `think` flag is ONLY sent if the model supports reasoning (capability
     'thinking'); sending the flag to a model that lacks it (e.g. qwen2.5vl)
@@ -1157,7 +1179,7 @@ def query_vlm(img_b64, model, scope="industrial", max_tokens=8192,
     if force_json:
         parsed, ok = extract_json(content)
         if ok:
-            normalize_bboxes(parsed, size)
+            normalize_bboxes(parsed, size, model)
     else:
         parsed, ok = None, False  # free-form answer lives in `content`
     return {
