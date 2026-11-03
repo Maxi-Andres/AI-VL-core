@@ -211,24 +211,191 @@ def camera_to_torso(p_optical, xyz=D435_XYZ, rpy=D435_RPY):
     return rpy_matrix(*rpy) @ p_link + np.asarray(xyz, dtype=np.float64)
 
 
+def color_ray_in_torso(u, v, calib, color_size=None):
+    """(origin, unit direction) in torso_link of the colour camera's ray through pixel (u, v)."""
+    color = calib.color if color_size is None else calib.color.scaled(*color_size)
+    r = np.asarray(calib.rotation, dtype=np.float64).reshape(3, 3)
+    t = np.asarray(calib.translation, dtype=np.float64)
+    d_col = np.array([(u - color.ppx) / color.fx, (v - color.ppy) / color.fy, 1.0])
+    # colour optical -> depth optical is the inverse of depth -> colour: p_d = R^T (p_c - t)
+    origin_d, dir_d = r.T @ (-t), r.T @ d_col
+    origin = camera_to_torso(origin_d)
+    direction = camera_to_torso(origin_d + dir_d) - origin
+    return origin, direction / np.linalg.norm(direction)
+
+
+def fit_plane(points, tol=0.015, rounds=4):
+    """(centroid, unit normal pointing up in +z, inliers) of the dominant plane, or None."""
+    if len(points) < MIN_POINTS:
+        return None
+    inl = np.ones(len(points), bool)
+    for _ in range(rounds):
+        c = points[inl].mean(axis=0)
+        n = np.linalg.svd(points[inl] - c)[2][2]
+        n = n * (1 if n[2] >= 0 else -1)
+        inl = np.abs((points - c) @ n) < tol
+        if inl.sum() < MIN_POINTS:
+            return None
+    return c, n, inl
+
+
+# A support is a TABLE only if it is near level in the torso frame. The torso itself leans a few
+# degrees (4.7 on the G1 2026-11-03); a wall behind the object is ~90 off.
+TABLE_MAX_TILT_DEG = 25.0
+# The table is sampled in two bands beside the object's base: as wide as the box on each side,
+# from 35% of the box's height above its bottom edge to 10% below it.
+TABLE_BAND = (0.35, 0.10)
+
+
+def torso_to_color_pixels(points, calib, color):
+    """N x 3 torso-frame points -> N x 2 pixels of the colour picture `color`."""
+    r = rpy_matrix(*D435_RPY)
+    p_link = (np.asarray(points) - np.asarray(D435_XYZ)) @ r     # r.T @ p, row-wise
+    p_opt = p_link @ OPTICAL_TO_LINK                              # OPTICAL_TO_LINK.T @ p
+    return project(to_color_frame(p_opt, calib), color)
+
+
+_RING = np.linspace(0, 2 * np.pi, 36, endpoint=False)
+
+
+def cylinder_box(base, up, height, radius, calib, color):
+    """The colour-picture box of an upright cylinder standing at `base` along `up`."""
+    e1 = np.cross(up, [1.0, 0.0, 0.0])
+    if np.linalg.norm(e1) < 1e-6:
+        e1 = np.cross(up, [0.0, 1.0, 0.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(up, e1)
+    ring = radius * (np.outer(np.cos(_RING), e1) + np.outer(np.sin(_RING), e2))
+    pts = np.concatenate((base + ring, base + height * up + ring))
+    uv = torso_to_color_pixels(pts, calib, color)
+    return np.array([uv[:, 0].min(), uv[:, 1].min(), uv[:, 0].max(), uv[:, 1].max()])
+
+
+def fit_cylinder(box, plane_c, up, base0, height0, radius0, calib, color, iters=30):
+    """(base, height, radius): the upright cylinder on the plane (plane_c, up) whose picture's
+    box is `box` — Gauss-Newton on the 4 box edges, 4 unknowns (2 on the plane, height,
+    radius). None if it does not converge to within ~2 px."""
+    e1 = np.cross(up, [0.0, 0.0, 1.0] if abs(up[2]) < 0.9 else [1.0, 0.0, 0.0])
+    e1 /= np.linalg.norm(e1)
+    e2 = np.cross(up, e1)
+    base0 = base0 - ((base0 - plane_c) @ up) * up                 # onto the plane
+    x = np.array([0.0, 0.0, height0, radius0])
+    target = np.asarray(box, dtype=np.float64)
+
+    def model(x):
+        b = base0 + x[0] * e1 + x[1] * e2
+        return cylinder_box(b, up, max(x[2], 0.01), max(x[3], 0.003), calib, color)
+
+    for _ in range(iters):
+        r = model(x) - target
+        jac = np.empty((4, 4))
+        for k, step in enumerate((1e-3, 1e-3, 1e-3, 1e-4)):
+            dx = np.zeros(4)
+            dx[k] = step
+            jac[:, k] = (model(x + dx) - model(x)) / step
+        delta = np.linalg.lstsq(jac, -r, rcond=None)[0]
+        x = x + np.clip(delta, -0.05, 0.05)
+        if np.abs(delta).max() < 1e-5:
+            break
+    if np.abs(model(x) - target).max() > 2.0 or x[2] <= 0.01 or x[3] <= 0.003:
+        return None
+    return base0 + x[0] * e1 + x[1] * e2, float(x[2]), float(x[3])
+
+
+def standing_on_table(points, box, calib, color_size=None):
+    """Where an object STANDING on a table is, from the table alone — or None.
+
+    For what the depth camera cannot see: clear plastic, glass, black. MEASURED on the G1
+    2026-11-03 with a 23 cm clear water bottle: 62 readings inside its box, nearly all of the
+    table seen through it. But the table around its base reads perfectly, so: fit the table
+    plane beside the base, cross it with the colour ray through the box's bottom-centre (the
+    front edge of the base), step back half the box's width (the base is round, the edge is its
+    front), and cross the ray through the top-centre with the vertical above that point for the
+    height. That run gave 0.238 m for the 0.23 m bottle."""
+    x1, y1, x2, y2 = box
+    w, h = x2 - x1, y2 - y1
+    color = calib.color if color_size is None else calib.color.scaled(*color_size)
+    uv = project(to_color_frame(points, calib), color)
+    up, down = TABLE_BAND
+    rows = (uv[:, 1] >= y2 - up * h) & (uv[:, 1] <= y2 + down * h)
+    left = (uv[:, 0] >= x1 - w) & (uv[:, 0] < x1 - 0.05 * w)
+    right = (uv[:, 0] > x2 + 0.05 * w) & (uv[:, 0] <= x2 + w)
+    ring = points[rows & (left | right)]
+    torso = np.array([camera_to_torso(p) for p in ring]) if len(ring) else ring
+    plane = fit_plane(torso)
+    if plane is None:
+        return None
+    c, n, inl = plane
+    if np.degrees(np.arccos(min(1.0, n[2]))) > TABLE_MAX_TILT_DEG:
+        return None                          # a wall or a slope, not something to stand on
+    o, e = color_ray_in_torso((x1 + x2) / 2, y2, calib, color_size)
+    denom = e @ n
+    if abs(denom) < 1e-3:
+        return None                          # looking along the table: no crossing
+    # A first guess from the box's bottom-centre and width, then the real fit: the upright
+    # cylinder ON this plane whose picture has exactly this box. The guess alone is biased —
+    # perspective leans a vertical object off-centre, so the box is wider than the object and
+    # its centre is not the base's (synthetic bottle: radius 6.9 cm for 3.2, 6 cm sideways).
+    front = o + ((c - o) @ n) / denom * e
+    rng = float(np.linalg.norm(front - o))
+    o2, e2 = color_ray_in_torso((x1 + x2) / 2, y1, calib, color_size)
+    _a, h0 = np.linalg.lstsq(np.column_stack((e2, -n)), front - o2, rcond=None)[0]
+    fit = fit_cylinder(box, c, n, front, max(float(h0), 0.05), w / color.fx * rng / 4,
+                       calib, color)
+    if fit is None:
+        return None
+    base, height, radius = fit
+    return {"base": base, "height": float(height), "radius": radius, "up": n, "table_c": c,
+            "table_points": int(inl.sum()),
+            "table_tilt_deg": float(np.degrees(np.arccos(min(1.0, n[2]))))}
+
+
+
+
+
 def locate(z, box, calib, color_size=None, scale_m=0.001, keep=0.5):
     """The whole chain: depth snapshot + colour box -> a dict with the torso-frame position.
 
-    {"ok": True, "torso": [x, y, z], "camera": [x, y, z], "range_m", "points", "spread_m",
-     "calibration": "measured"|"nominal"} — or {"ok": False, "error": why}."""
+    "method": "table" when the object stands on a table: "torso" is the centre of its base,
+    "grasp" the middle of its axis, "top", "height_m", "radius_m", and "surface_check" (its own
+    readings, with how far off the axis they are). "method": "surface" otherwise: "torso" is
+    its front surface, plus "camera", "range_m", "points", "spread_m". Both carry
+    "calibration": "measured"|"nominal". Or {"ok": False, "error": why}."""
     pts = depth_points(z, calib.depth, scale_m, step=2)
     inside = points_in_box(pts, calib, box, color_size, keep)
     found = front_surface(inside)
-    if found is None:
-        return {"ok": False, "points": len(inside),
-                "error": f"only {len(inside)} depth readings inside the box (glass, black "
-                         f"cloth, or closer than the D435's ~0.2 m minimum)"
-                if len(inside) < MIN_POINTS else "no surface stands out inside the box"}
-    centre, n, spread = found
-    torso = camera_to_torso(centre)
-    return {"ok": True,
-            "torso": [round(float(v), 4) for v in torso],
-            "camera": [round(float(v), 4) for v in centre],
-            "range_m": round(float(np.linalg.norm(centre)), 4),
-            "points": n, "spread_m": round(spread, 4),
-            "calibration": "nominal" if calib.nominal else "measured"}
+    stand = standing_on_table(pts, box, calib, color_size)
+    cal_name = "nominal" if calib.nominal else "measured"
+    surface = None
+    if found is not None:
+        centre, n, spread = found
+        surface = {"torso": [round(float(v), 4) for v in camera_to_torso(centre)],
+                   "camera": [round(float(v), 4) for v in centre],
+                   "range_m": round(float(np.linalg.norm(centre)), 4),
+                   "points": n, "spread_m": round(spread, 4)}
+    # An object standing on a table is located BY the table whenever there is one: the table
+    # reads cleanly, and the fit gives what an arm needs (the axis and the height). The object's
+    # own readings come second because they lie on anything clear — MEASURED on the G1
+    # 2026-11-03, clear 23 cm bottle: table fit 0.231 m tall, while its 58 "surface" readings
+    # put its front 2-3 cm BEHIND its axis (refraction). They are kept as a cross-check.
+    if stand is not None and 0.02 < stand["height"] < 0.6:
+        base, up, tall = stand["base"], stand["up"], stand["height"]
+        out = {"ok": True, "method": "table",
+               "torso": [round(float(v), 4) for v in base],
+               "grasp": [round(float(v), 4) for v in base + tall / 2 * up],
+               "top": [round(float(v), 4) for v in base + tall * up],
+               "height_m": round(tall, 4), "radius_m": round(float(stand["radius"]), 4),
+               "table_points": stand["table_points"],
+               "table_tilt_deg": round(stand["table_tilt_deg"], 1), "calibration": cal_name}
+        if surface is not None:
+            p = np.asarray(surface["torso"]) - base
+            off_axis = float(np.linalg.norm(p - (p @ up) * up))
+            out["surface_check"] = {**surface, "off_axis_m": round(off_axis, 4)}
+        return out
+    if surface is not None:
+        return {"ok": True, "method": "surface", **surface, "calibration": cal_name}
+    return {"ok": False, "points": len(inside),
+            "error": f"only {len(inside)} depth readings inside the box (glass, black cloth, "
+                     f"or closer than the D435's ~0.2 m minimum), and no table around its base"
+            if len(inside) < MIN_POINTS else
+            "no surface stands out inside the box, and no table around its base"}
