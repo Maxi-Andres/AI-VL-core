@@ -109,7 +109,7 @@ def main(go):
     # The way up is the user's, taught from the Joints page (taught_poses.json): every posture
     # seen on the robot with nothing touched. The IK only plans from the last one, `ready`.
     taught = {p["name"]: np.array([p["q"][n] for n in ik.joint_names("right")])
-              for p in json.loads(Path(__file__).with_name("taught_poses.json").read_text())}
+              for p in json.loads((Path(__file__).resolve().parents[2] / "config" / "g1_taught_poses.json").read_text())}
     way_up = [taught[n] for n in ("way_up_2", "way_up_3", "way_up_4", "ready")]
     raised = taught["ready"]
     # Down from RAISED well to the right of the bottle first, then in beside it: straight from

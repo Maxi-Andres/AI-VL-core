@@ -28,7 +28,7 @@ def main(name):
     print(dict(zip(names, np.round(q, 3), strict=True)))
     print("hand:", d.get("right"), "| wrist", np.round(joints[6][0], 3), "far end (long hand)",
           np.round(tips, 3))
-    path = Path(__file__).with_name("taught_poses.json")
+    path = Path(__file__).resolve().parents[2] / "config" / "g1_taught_poses.json"
     data = json.loads(path.read_text()) if path.exists() else []
     data.append({"name": name, "time": time.strftime("%Y-%m-%d %H:%M:%S"),
                  "q": dict(zip(names, [round(float(v), 4) for v in q], strict=True)),
