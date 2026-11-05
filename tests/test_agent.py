@@ -169,3 +169,63 @@ def test_a_model_that_stops_answering_ends_the_run_cleanly():
     out = ag.run("agarrá la botella", emit, llm=down, tools={})
     assert out.startswith("El modelo de lenguaje no responde")
     assert [e["type"] for e in events][-2:] == ["error", "reply"]
+
+
+# --------------------------------------------------------------------------- #
+# walk — the robot walks to a point; the loop is on the robot, this only follows it
+# --------------------------------------------------------------------------- #
+def fake_walk_executor(states, refuse=None):
+    """A /walk/control that answers goto, then `states` to successive status calls."""
+    sent = []
+
+    def call(body):
+        sent.append(body)
+        if body["op"] == "goto":
+            return {"ok": False, "error": refuse} if refuse else {"ok": True, "walk": states[0]}
+        if body["op"] == "cancel":
+            return {"ok": True}
+        k = sum(1 for b in sent if b["op"] == "status") - 1
+        return {"ok": True, "walk": states[min(k, len(states) - 1)]}
+    call.sent = sent
+    return call
+
+
+def test_walk_sends_metres_and_radians_and_reports_how_far_off_it_stopped():
+    call = fake_walk_executor([
+        {"state": "running", "phase": "translate"},
+        {"state": "running", "phase": "turn"},
+        {"state": "success", "phase": "done", "error": {"pos_m": 0.04, "yaw_deg": -2.0}},
+    ])
+    events, emit = collect()
+    out = ag.tool_walk({"forward_m": 2}, emit, threading.Event(), call=call, poll_s=0)
+    assert call.sent[0] == {"op": "goto", "dx": 2.0, "dy": 0.0, "dyaw": 0.0}
+    assert out == {"ok": True, "state": "success", "off_cm": 4, "off_deg": 2.0}
+    assert [e["step"] for e in events] == ["translate", "turn", "success"]
+
+
+def test_turn_is_degrees_left_sent_as_radians():
+    import math
+    call = fake_walk_executor([{"state": "success", "error": {"pos_m": 0.0, "yaw_deg": 1.0}}])
+    out = ag.tool_turn({"degrees": -90}, collect()[1], threading.Event(), call=call, poll_s=0)
+    assert call.sent[0] == {"op": "goto", "dx": 0.0, "dy": 0.0, "dyaw": math.radians(-90)}
+    assert out["ok"] is True
+
+
+def test_walk_stop_cancels_it_on_the_robot():
+    call = fake_walk_executor([{"state": "running", "phase": "translate"},
+                               {"state": "cancelled", "reason": "cancel from the agent"}])
+    stop = threading.Event()
+    stop.set()
+    out = ag.tool_walk({"forward_m": 1}, collect()[1], stop, call=call, poll_s=0)
+    assert {"op": "cancel"} in call.sent
+    assert out["ok"] is False and out["state"] == "cancelled"
+
+
+@pytest.mark.parametrize("args, why", [
+    ({"forward_m": "lejos"}, "numbers"),
+    ({"forward_m": 9}, "at most 3 m per request"),
+])
+def test_walk_refusals_reach_the_model(args, why):
+    call = fake_walk_executor([], refuse="at most 3 m per request")
+    out = ag.tool_walk(args, collect()[1], threading.Event(), call=call, poll_s=0)
+    assert out["ok"] is False and why in out["error"]

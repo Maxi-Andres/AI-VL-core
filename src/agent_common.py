@@ -38,6 +38,19 @@ TOOLS = {
                 "lifts it, puts it back where it was and brings the arm home. MOVES THE ROBOT. "
                 "Only objects standing on the table, about the size of a bottle or a cup.",
     },
+    "walk": {
+        "args": {"forward_m": "metres to walk forward (negative = back), at most 3",
+                 "left_m": "metres to step sideways to its left (negative = right), usually 0"},
+        "does": "Walks the robot by itself in a straight line, keeping the way it faces. MOVES "
+                "THE ROBOT. It cannot see obstacles, so only short, clear walks. Use it to step "
+                "closer to the table. To turn, use turn.",
+    },
+    "turn": {
+        "args": {"degrees": "how far to turn in place, at most 180: LEFT is positive, RIGHT is "
+                            "negative ('turn right' = -90, 'turn left' = 90, 'turn around' = 180)"},
+        "does": "Turns the robot in place. MOVES THE ROBOT. For 'turn and walk', call turn first "
+                "and then walk; for 'walk and turn', walk first.",
+    },
     "place": {
         "args": {"object": "the thing to move, in words, e.g. 'the water bottle'",
                  "into": "where to put it, in words, e.g. 'the cardboard box'"},
@@ -54,7 +67,8 @@ def _tools_text():
 
 
 PLAN_SYSTEM = (
-    "You control a Unitree G1 humanoid robot standing at a table. You can use these tools:\n"
+    "You control a Unitree G1 humanoid robot, usually standing at a table. It can walk short "
+    "distances by itself. You can use these tools:\n"
     "{tools}\n"
     "Read the instruction and answer ONLY JSON: {{\"understood\": what is being asked, in one "
     "short line, \"plan\": [the steps, each a few words], \"needs_robot\": true or false}}. "
@@ -62,7 +76,8 @@ PLAN_SYSTEM = (
     "Write understood and the plan in the language of the instruction.")
 
 STEP_SYSTEM = (
-    "You control a Unitree G1 humanoid robot standing at a table. Tools:\n"
+    "You control a Unitree G1 humanoid robot, usually standing at a table; it can walk short "
+    "distances by itself. Tools:\n"
     "{tools}\n"
     "You are carrying out the instruction step by step. Given what has happened so far, answer "
     "ONLY JSON, one of:\n"
@@ -151,7 +166,81 @@ def _run_action(tool, args, emit, stop, start, poll_s, **kw):
         time.sleep(poll_s)
 
 
-TOOL_FNS = {"look": tool_look, "pick": tool_pick, "place": tool_place}
+def _executor_walk(body, timeout=6):
+    """POST the executor's /walk/control (the loop itself runs on the robot, in the relay)."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    import manipulation
+    req = urllib.request.Request(f"{manipulation.EXECUTOR_URL}/walk/control?robot=g1",
+                                 data=_json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return _json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            out = _json.loads(exc.read() or b"{}")
+        except ValueError:
+            out = {}
+        return {"ok": False, "error": out.get("error") or f"HTTP {exc.code}", **out}
+
+
+WALK_POLL_S = 0.4
+WALK_RUNNING = ("starting", "running")
+
+
+def tool_walk(args, emit, stop, call=None, poll_s=WALK_POLL_S):
+    """Walk in a straight line relative to where the robot stands, to its end."""
+    try:
+        fwd, left = (float(args.get(k) or 0) for k in ("forward_m", "left_m"))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "forward_m and left_m must be numbers"}
+    return _walk("walk", fwd, left, 0.0, emit, stop, call, poll_s)
+
+
+def tool_turn(args, emit, stop, call=None, poll_s=WALK_POLL_S):
+    """Turn in place, `degrees` left (negative = right), to its end."""
+    try:
+        degrees = float(args.get("degrees") or 0)
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "degrees must be a number"}
+    return _walk("turn", 0.0, 0.0, degrees, emit, stop, call, poll_s)
+
+
+def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
+    """One walk to a point (the relay's Walk, on the robot), followed to its end. `stop` (the
+    STOP button) cancels it on the robot. The limits are the relay's: a refusal comes back as
+    the tool's error, for the model to read."""
+    import math
+    call = call or _executor_walk
+    out = call({"op": "goto", "dx": fwd, "dy": left, "dyaw": math.radians(turn)})
+    if not out.get("ok"):
+        return {"ok": False, "error": out.get("error") or "the robot refused the walk"}
+    phase = None
+    while True:
+        if stop.is_set():
+            call({"op": "cancel"})
+        w = (call({"op": "status"}) or {}).get("walk") or {}
+        if w.get("phase") and w.get("phase") != phase and w.get("state") in WALK_RUNNING:
+            phase = w["phase"]
+            emit({"type": "tool_event", "tool": tool, "step": phase,
+                  "detail": "straight to the point" if phase == "translate" else "turning"})
+        if w.get("state") not in WALK_RUNNING:
+            err = w.get("error") or {}
+            emit({"type": "tool_event", "tool": tool, "step": w.get("state") or "unknown",
+                  "detail": w.get("reason") or (f"{err.get('pos_m', 0) * 100:.0f} cm and "
+                                                f"{abs(err.get('yaw_deg', 0)):.0f} deg off")})
+            return {"ok": w.get("state") == "success", "state": w.get("state"),
+                    "off_cm": round(err.get("pos_m", 0) * 100) if err else None,
+                    "off_deg": abs(err.get("yaw_deg", 0)) if err else None,
+                    **({"reason": w["reason"]} if w.get("reason") else {})}
+        time.sleep(poll_s)
+
+
+TOOL_FNS = {"look": tool_look, "pick": tool_pick, "place": tool_place, "walk": tool_walk,
+            "turn": tool_turn}
 
 
 # --------------------------------------------------------------------------- #
