@@ -286,7 +286,8 @@ def test_navigate_to_a_target_right_in_front_does_not_walk():
 def test_command_offers_the_safe_moves_and_not_walking_or_dangerous_ones():
     names = ag.command_skills()
     assert {"wave_hand", "shake_hand", "arm_action", "sit", "stop"} <= set(names)
-    assert not {"walk", "turn", "damp", "zero_torque", "dance", "set_fsm_id", "unknown"} & set(names)
+    assert not {"walk", "turn", "damp", "zero_torque", "dance", "set_fsm_id", "unknown",
+                "run", "start"} & set(names)                       # the mode is the operator's
     assert "clap" in ag._tools_text()                            # the arm actions are listed
 
 

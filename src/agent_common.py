@@ -77,8 +77,10 @@ def _tools_text():
 # source of truth), minus what is not the agent's to do. Out: navigate's walking and turning;
 # the skills safe mode holds back (they drop the robot or swap its controller) and the hidden
 # raw ones; getting up off the floor and the stair controller, which only an operator who sees
-# the robot should start.
-COMMAND_LEFT_OUT = {"walk", "turn", "unknown", "lie_up", "climb"}
+# the robot should start; and the walk/run controllers: the mode is the operator's (Nav2 walks
+# in Run at the Slow speed, 2026-11-11 — in Walk the G1 marks time at that speed).
+COMMAND_LEFT_OUT = {"walk", "turn", "unknown", "lie_up", "climb",
+                    "start", "run", "run_waist", "walk_waist"}
 
 
 def command_skills():
