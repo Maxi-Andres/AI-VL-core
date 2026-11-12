@@ -342,12 +342,13 @@ def test_the_conversation_so_far_goes_with_every_call_to_the_model(earlier, now)
     assert llm.seen[0].endswith(f"Instruction now: {now}")
 
 
-def test_without_a_conversation_the_prompts_are_as_before():
+def test_without_a_conversation_no_earlier_turns_are_told():
     _events, emit = collect()
     llm = scripted({"understood": "hi", "plan": []}, {"reply": "hola"})
     ag.run("hola", emit, llm=llm, tools={}, history=[])
-    assert llm.seen[0] == "hola"
-    assert llm.seen[1].startswith("Instruction: hola")
+    assert "Earlier in this conversation" not in llm.seen[0]
+    assert llm.seen[0].endswith("Instruction now: hola")
+    assert "Instruction: hola" in llm.seen[1]
 
 
 def test_only_the_newest_turns_that_fit_go_and_empty_ones_are_skipped():
@@ -360,3 +361,80 @@ def test_only_the_newest_turns_that_fit_go_and_empty_ones_are_skipped():
     assert "stopped before anything" not in text
     assert text.index("q38") < text.index("q39")             # oldest first
     assert ag.history_text([]) == ""
+
+
+# --------------------------------------------------------------------------- #
+# What the vision chat has, the agent has (2026-11-12)
+# --------------------------------------------------------------------------- #
+def test_the_agent_is_told_the_time_the_robots_notes_and_its_state():
+    _events, emit = collect()
+    llm = scripted({"understood": "x", "plan": []}, {"reply": "En el cajón."})
+    ag.run("¿dónde está la llave?", emit, llm=llm, tools={},
+           notes=["la llave está en el cajón"], state={"battery": {"percent": 41, "charging": False}})
+    for told in llm.seen:
+        assert "Now it is" in told
+        assert "la llave está en el cajón" in told
+        assert "41 %" in told
+
+
+@pytest.mark.parametrize("instruction, lang", [("aplaudí", "Spanish"), ("clap your hands", "English")])
+def test_every_step_is_told_the_language_to_reply_in(instruction, lang):
+    """Seen on the robot: "Aplaudí" answered "I can't clap right now"."""
+    _events, emit = collect()
+    llm = scripted({"understood": "x", "plan": []}, {"reply": "ok"})
+    ag.run(instruction, emit, llm=llm, tools={})
+    assert llm.seen[1].endswith(f"(Any reply must be in {lang}.)")
+
+
+def test_a_move_named_by_its_parameter_is_explained_not_guessed():
+    """Seen on the robot: skill "clap" was refused with only the list of moves, and the model
+    gave up. Nothing is mapped by hand: the error says where "clap" is, the model calls it."""
+    out = ag.tool_command({"skill": "clap"}, lambda e: None, threading.Event(),
+                          call=lambda body: pytest.fail("sent"))
+    assert not out["ok"]
+    assert '{"skill": "arm_action", "params": {"action": "clap"}}' in out["error"]
+    assert "no move 'fly'" in ag.tool_command({"skill": "fly"}, lambda e: None, threading.Event(),
+                                              call=lambda body: pytest.fail("sent"))["error"]
+
+
+def test_moves_are_offered_as_calls():
+    assert 'skill "arm_action" (Arm action) with params {"action": one of' in ag._skills_text()
+
+
+def test_search_tells_the_model_the_results_with_their_sites_and_today():
+    events, emit = collect()
+    found = [{"title": "Clima en Buenos Aires", "url": "https://www.smn.gob.ar/x",
+              "content": "Hoy 24 grados, soleado", "date": "2026-11-12"}]
+    out = ag.tool_search({"query": "clima buenos aires"}, emit, threading.Event(),
+                         find=lambda q: found)
+    assert out["ok"] and "24 grados" in out["results"] and "smn.gob.ar" in out["results"]
+    assert out["today"]
+    assert [e["step"] for e in events] == ["searching", "found"]
+
+
+def test_a_failed_or_empty_search_says_so_and_not_to_guess():
+    def down(q):
+        raise ConnectionError("searxng down")
+    out = ag.tool_search({"query": "dólar hoy"}, lambda e: None, threading.Event(), find=down)
+    assert not out["ok"] and "do not guess" in out["error"]
+    out = ag.tool_search({"query": "zzz"}, lambda e: None, threading.Event(), find=lambda q: [])
+    assert "nothing found" in out["results"]
+    assert not ag.tool_search({}, lambda e: None, threading.Event(), find=lambda q: [])["ok"]
+
+
+def test_remember_hands_the_note_and_picture_to_the_gateway():
+    events, emit = collect()
+    out = ag.tool_remember({"note": "la llave está en el cajón", "picture": True}, emit,
+                           threading.Event(), frame=lambda: "QUJD")
+    assert out == {"ok": True, "kept": "a note and a picture"}
+    assert events == [{"type": "keep", "note": "la llave está en el cajón", "image": "QUJD"}]
+    events.clear()
+    assert ag.tool_remember({"note": "el código es 4455"}, emit, threading.Event())["ok"]
+    assert events == [{"type": "keep", "note": "el código es 4455"}]
+    assert not ag.tool_remember({}, emit, threading.Event())["ok"]
+    assert not ag.tool_remember({"picture": True}, emit, threading.Event(), frame=lambda: "")["ok"]
+
+
+def test_the_model_is_offered_search_and_remember():
+    text = ag._tools_text()
+    assert "- search(" in text and "- remember(" in text

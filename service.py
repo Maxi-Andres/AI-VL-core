@@ -727,6 +727,9 @@ class AgentRequest(BaseModel):
     # The conversation so far, oldest first; the newest turns that fit go along as text
     # (agent_common.history_text).
     history: list[AgentTurn] = Field(default_factory=list, max_length=50)
+    # Set by the gateway, as for the vision chat: the robot's notes and state (about_now).
+    robot_notes: list[str] | None = None
+    robot_state: dict | None = None
 
 
 _AGENT = {"stop": None}
@@ -749,7 +752,8 @@ def agent(req: AgentRequest):
     def work():
         try:
             agent_common.run(req.text.strip(), events.put, stop=stop,
-                             history=[t.model_dump() for t in req.history])
+                             history=[t.model_dump() for t in req.history],
+                             notes=req.robot_notes, state=req.robot_state)
         except Exception as e:                   # the trace says it
             events.put({"type": "error", "text": f"{type(e).__name__}: {e}"})
         finally:

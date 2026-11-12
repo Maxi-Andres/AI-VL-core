@@ -95,7 +95,7 @@ def test_the_agent_streams_its_trace_as_server_sent_events(client, monkeypatch):
     import agent_common
     c, _ = client
 
-    def fake_run(text, emit, stop=None, history=None):
+    def fake_run(text, emit, stop=None, **_kw):
         emit({"type": "heard", "text": text})
         emit({"type": "reply", "text": "Listo."})
         return "Listo."

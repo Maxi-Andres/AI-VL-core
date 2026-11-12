@@ -22,6 +22,12 @@ The conversation so far rides on every instruction (2026-11-12, as the vision ch
 answered, the newest that fit HISTORY_CHARS. So "ahora dejala en la mesa" knows which bottle
 it is holding. It is context only: the model is told the instruction to carry out is the last
 one, never to do an earlier one again.
+
+Everything the vision chat can do, the agent can too (2026-11-12, "el agent tiene que tener
+todas las herramientas del vlm"): `search` the internet (search_common, the same SearXNG),
+`remember` a note or a picture of what it sees (the gateway keeps it in the robot's Memory, the
+same one Live's "acordate…" fills: iacore only says so, in a "keep" event), and it is told what
+the chat is told — the time, the robot's notes and its state (battery, link).
 """
 from __future__ import annotations
 
@@ -65,9 +71,23 @@ TOOLS = {
                 "in sight, turn and look first.",
     },
     "command": {
-        "args": {"skill": "one of the robot's own moves below",
-                 "params": "an object with that move's parameters, e.g. {\"action\": \"clap\"}"},
+        "args": {"skill": "the name of one of the moves below",
+                 "params": "that move's parameters, e.g. to clap: skill \"arm_action\" with "
+                           "params {\"action\": \"clap\"}"},
         "does": "One of the robot's built-in moves. MOVES THE ROBOT. The moves: {skills}",
+    },
+    "search": {
+        "args": {"query": "what to look up, in a few words, e.g. 'clima Buenos Aires hoy'"},
+        "does": "Searches the internet and gives the first results with their sites and "
+                "dates. Use it for anything outside the room and outside what you know: news, "
+                "weather, prices, schedules, facts.",
+    },
+    "remember": {
+        "args": {"note": "the fact to remember, in words (leave it out for only a picture)",
+                 "picture": "true to also keep a picture of what the camera sees now"},
+        "does": "Keeps a note, a picture, or both, in the robot's memory, where the team sees "
+                "them; your notes come back to you with every instruction. Use it when the "
+                "person asks you to remember something or to take a picture.",
     },
     "place": {
         "args": {"object": "the thing to move, in words, e.g. 'the water bottle'",
@@ -104,15 +124,19 @@ def command_skills():
 
 
 def _skills_text():
+    """Each move as the call that makes it: the skill's name, then its params. Written as
+    "arm_action (Arm action; action: one of … clap …)" the 4B took "clap" for a move
+    (2026-11-12)."""
     parts = []
     for name, s in command_skills().items():
         ps = []
         for pname, p in s["params"].items():
             if "values" in p:
-                ps.append(f"{pname}: one of {', '.join(p['values'])}")
+                ps.append(f'"{pname}": one of {"|".join(p["values"])}')
             elif p.get("type") == "bool":
-                ps.append(f"{pname}: true/false")
-        parts.append(f"{name} ({s.get('label') or name}{'; ' + '; '.join(ps) if ps else ''})")
+                ps.append(f'"{pname}": true or false')
+        label = s.get("label") or name
+        parts.append(f'skill "{name}" ({label})' + (f" with params {{{', '.join(ps)}}}" if ps else ""))
     return "; ".join(parts) + "."
 
 
@@ -133,8 +157,12 @@ STEP_SYSTEM = (
     "ONLY JSON, one of:\n"
     "{{\"thought\": why, \"tool\": a tool name, \"args\": {{...}}}} to use a tool, or\n"
     "{{\"thought\": why, \"reply\": what to tell the person}} when it is done, impossible, or "
-    "only needed words. Never claim something worked unless a tool result says so. Reply in the "
-    "language of the instruction, short and plain.")
+    "only needed words. Never claim something worked unless a tool result says so. Never do a "
+    "step again that already worked: once the results show the instruction is done, reply. "
+    "Reply in the "
+    "language of the instruction, short and plain, as the robot, in your own words: never "
+    "repeat or echo what the person said. The instruction comes from speech-to-text and may "
+    "hold other people's talk around the robot: act only on what is said to you.")
 
 
 def history_text(history, budget=HISTORY_CHARS):
@@ -178,23 +206,82 @@ def llm_json(system, user, url=LLAMACPP_HOST, max_tokens=300, image_b64=None):
 # --------------------------------------------------------------------------- #
 # The tools
 # --------------------------------------------------------------------------- #
-def tool_look(args, emit, stop, url=LLAMACPP_HOST):
+def _frame_b64():
+    """What the robot's head camera sees now, as a base64 JPEG ("" when it gave none)."""
     import base64
 
     import cv2
 
     import locate_object as lo
+    ok, buf = cv2.imencode(".jpg", lo.grab_color(), [cv2.IMWRITE_JPEG_QUALITY, 85])
+    return base64.b64encode(buf.tobytes()).decode() if ok else ""
+
+
+def tool_look(args, emit, stop, url=LLAMACPP_HOST, frame=None):
     question = str(args.get("question") or "What do you see?")
-    frame = lo.grab_color()
-    ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-    if not ok:
+    b64 = (frame or _frame_b64)()
+    if not b64:
         return {"ok": False, "error": "no picture"}
-    b64 = base64.b64encode(buf.tobytes()).decode()
     payload = {"model": "", "stream": True,
                "options": {"temperature": 0.1, "num_predict": 200},
                "messages": [{"role": "user", "content": question, "images": [b64]}]}
     content, *_ = stream_chat(payload, url=url, timeout=60)
     return {"ok": True, "answer": content.strip()}
+
+
+SEARCH_RESULTS_CHARS = 1800     # of results told to the model: its window is shared
+
+
+def tool_search(args, emit, stop, find=None):
+    """The internet, as the vision chat searches it (search_common, the local SearXNG)."""
+    import datetime
+    from urllib.parse import urlsplit
+
+    import search_common as sc
+    query = " ".join(str(args.get("query") or "").split())[:200]
+    if not query:
+        return {"ok": False, "error": "no query: say what to look up"}
+    emit({"type": "tool_event", "tool": "search", "step": "searching", "detail": query})
+    try:
+        if find is None:
+            results = sc.search(query)
+            if results:
+                sc.read_pages(results, query)
+        else:
+            results = find(query)
+    except Exception as exc:
+        return {"ok": False, "error": f"the search failed ({type(exc).__name__}): do not guess"}
+    if not results:
+        return {"ok": True, "query": query, "results": "nothing found: say so, do not guess"}
+    lines, used = [], 0
+    for r in results:
+        site = (urlsplit(r.get("url") or "").hostname or "").removeprefix("www.")
+        when = f", {r['date']}" if r.get("date") else ""
+        found = f" {r['found']}" if r.get("found") else ""
+        line = f"{r.get('title') or ''} — {r.get('content') or ''}{found} ({site}{when})"
+        if used + len(line) > SEARCH_RESULTS_CHARS:
+            break
+        lines.append(line)
+        used += len(line)
+    emit({"type": "tool_event", "tool": "search", "step": "found",
+          "detail": f"{len(lines)} results"})
+    return {"ok": True, "query": query, "today": datetime.date.today().isoformat(),
+            "results": " | ".join(lines)}
+
+
+def tool_remember(args, emit, stop, frame=None):
+    """A note and/or a picture for the robot's memory. The gateway keeps it (it owns the
+    Memory); this only hands it over, as a "keep" event the gateway takes off the stream."""
+    note = " ".join(str(args.get("note") or "").split())[:500]
+    picture = args.get("picture") in (True, "true", "True", 1)
+    if not note and not picture:
+        return {"ok": False, "error": "nothing to remember: give a note or picture=true"}
+    image = (frame or _frame_b64)() if picture else ""
+    if picture and not image:
+        return {"ok": False, "error": "the camera gave no picture"}
+    emit({"type": "keep", "note": note, **({"image": image} if image else {})})
+    return {"ok": True, "kept": " and ".join(k for k, on in (("a note", note), ("a picture", image))
+                                             if on)}
 
 
 def tool_pick(args, emit, stop, start=None, poll_s=0.5):
@@ -398,15 +485,28 @@ def _executor_execute(body, timeout=20):
         return {"ok": False, "error": out.get("error") or f"HTTP {exc.code}", **out}
 
 
+def _no_such_move(skill):
+    """Why `skill` is not a move, in a way the model can act on: when it is a parameter's value
+    of a move ("clap" is arm_action's action), it says which move and how to call it. Read off
+    the catalog, nothing by hand: the model makes the call (2026-11-12: "Aplaudí" sent skill
+    "clap", was told only the list of moves, and gave up)."""
+    owners = [(name, pname) for name, spec in command_skills().items()
+              for pname, p in spec["params"].items() if skill in (p.get("values") or [])]
+    if owners:
+        how = " or ".join(f'{{"skill": "{n}", "params": {{"{pn}": "{skill}"}}}}' for n, pn in owners)
+        return f"'{skill}' is not a move but a value of a move's parameter: use {how}"
+    return f"no move '{skill}': use one of {sorted(command_skills())}"
+
+
 def tool_command(args, emit, stop, call=None):
     """One of the robot's built-in moves (command_skills), checked the way the command
     interpreter checks its own: unknown names and parameters never reach the robot."""
     import command_common as cc
     call = call or _executor_execute
     skill = str(args.get("skill") or "").strip()
-    if skill not in command_skills():
-        return {"ok": False, "error": f"no move '{skill}': use one of {sorted(command_skills())}"}
     params = args.get("params") if isinstance(args.get("params"), dict) else {}
+    if skill not in command_skills():
+        return {"ok": False, "error": _no_such_move(skill)}
     intent = cc.normalize_intent({"skill": skill, "params": params}, robot="g1")
     emit({"type": "tool_event", "tool": "command", "step": skill,
           "detail": ", ".join(f"{k}={v}" for k, v in intent["params"].items()) or "no parameters"})
@@ -416,7 +516,8 @@ def tool_command(args, emit, stop, call=None):
 
 
 TOOL_FNS = {"look": tool_look, "pick": tool_pick, "place": tool_place,
-            "navigate": tool_navigate, "command": tool_command}
+            "navigate": tool_navigate, "command": tool_command, "search": tool_search,
+            "remember": tool_remember}
 
 
 # --------------------------------------------------------------------------- #
@@ -426,8 +527,21 @@ class ModelDown(RuntimeError):
     pass
 
 
+def about_now(notes=None, state=None, now=None):
+    """What the vision chat is also told: the time, the robot's notes and its state."""
+    import vlm_common as vc
+    lines = [f"Now it is {vc._now_text(now, english=True)}."]
+    if remembered := vc.remembered(notes):
+        lines.append(remembered)
+    # All of the state the chat would say for "how are you" (battery, link): an instruction
+    # like "go charge if you are low" needs it without asking for it in those words.
+    if facts := vc.state_facts(state, "how are you"):
+        lines.append("About you: " + "; ".join(facts) + ".")
+    return "\n".join(lines) + "\n\n"
+
+
 def run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_STEPS,
-        history=None):
+        history=None, notes=None, state=None):
     """See _run. A language model that stops answering ends the run with an error event and a
     plain reply, never an exception out of the stream."""
     def safe_llm(system, user):
@@ -436,7 +550,7 @@ def run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_ST
         except Exception as exc:
             raise ModelDown(f"{type(exc).__name__}: {exc}") from None
     try:
-        return _run(instruction, emit, stop, safe_llm, tools, max_steps, history)
+        return _run(instruction, emit, stop, safe_llm, tools, max_steps, history, notes, state)
     except ModelDown as exc:
         emit({"type": "error", "text": f"the language model is not answering ({exc})"[:300]})
         reply = "El modelo de lenguaje no responde. / The language model is not answering."
@@ -445,7 +559,7 @@ def run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_ST
 
 
 def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_STEPS,
-         history=None):
+         history=None, notes=None, state=None):
     """Carry out `instruction`, emitting every step. Returns the final reply (also emitted).
     `history`: the conversation so far (history_text), sent with every call to the model.
 
@@ -454,9 +568,13 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
     stop = stop or threading.Event()
     tools = tools or TOOL_FNS
     emit({"type": "heard", "text": instruction})
-    earlier = history_text(history)
+    earlier = about_now(notes, state) + history_text(history)
+    # Said last, where the reply is written: "I can't clap right now" answered "Aplaudí"
+    # (2026-11-12) with the prompt's "in the language of the instruction" far above it.
+    import vlm_common as vc
+    lang = f"\n(Any reply must be in {'English' if vc.asked_in_english(instruction) else 'Spanish'}.)"
     plan = llm(PLAN_SYSTEM.format(tools=_tools_text()),
-               f"{earlier}Instruction now: {instruction}" if earlier else instruction)
+               f"{earlier}Instruction now: {instruction}")
     understood = str(plan.get("understood") or instruction)
     steps = [str(s) for s in plan.get("plan") or [] if str(s).strip()]
     emit({"type": "understood", "text": understood})
@@ -467,7 +585,7 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
     for _ in range(max_steps):
         if stop.is_set():
             break
-        step = llm(STEP_SYSTEM.format(tools=_tools_text()), earlier + "\n".join(steps_so_far))
+        step = llm(STEP_SYSTEM.format(tools=_tools_text()), earlier + "\n".join(steps_so_far) + lang)
         thought = str(step.get("thought") or "").strip()
         if thought:
             emit({"type": "thought", "text": thought})
@@ -495,7 +613,8 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
     why = ("the person pressed STOP" if stop.is_set() else
            f"you used all {max_steps} steps without finishing")
     end = llm(STEP_SYSTEM.format(tools=_tools_text()),
-              earlier + "\n".join([*steps_so_far, f"You must stop now: {why}. Reply to the person."]))
+              earlier + "\n".join([*steps_so_far, f"You must stop now: {why}. Reply to the person."])
+              + lang)
     reply = str(end.get("reply") or "").strip() or (
         "Me detuve. / Stopped." if stop.is_set() else
         "No pude terminarlo. / I could not finish it.")
