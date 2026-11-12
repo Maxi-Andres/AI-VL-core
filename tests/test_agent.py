@@ -5,6 +5,7 @@ the tools are fakes. In Spanish AND English, like every text of the assistant.
 """
 from __future__ import annotations
 
+import math
 import sys
 import threading
 from pathlib import Path
@@ -172,7 +173,7 @@ def test_a_model_that_stops_answering_ends_the_run_cleanly():
 
 
 # --------------------------------------------------------------------------- #
-# walk — the robot walks to a point; the loop is on the robot, this only follows it
+# navigate — the robot walks to a point; the loop is on the robot, this only follows it
 # --------------------------------------------------------------------------- #
 def fake_walk_executor(states, refuse=None):
     """A /walk/control that answers goto, then `states` to successive status calls."""
@@ -190,42 +191,128 @@ def fake_walk_executor(states, refuse=None):
     return call
 
 
-def test_walk_sends_metres_and_radians_and_reports_how_far_off_it_stopped():
+def test_navigate_by_metres_sends_metres_and_radians_and_reports_how_far_off_it_stopped():
     call = fake_walk_executor([
         {"state": "running", "phase": "translate"},
         {"state": "running", "phase": "turn"},
         {"state": "success", "phase": "done", "error": {"pos_m": 0.04, "yaw_deg": -2.0}},
     ])
     events, emit = collect()
-    out = ag.tool_walk({"forward_m": 2}, emit, threading.Event(), call=call, poll_s=0)
+    out = ag.tool_navigate({"forward_m": 2}, emit, threading.Event(), call=call, poll_s=0)
     assert call.sent[0] == {"op": "goto", "dx": 2.0, "dy": 0.0, "dyaw": 0.0}
     assert out == {"ok": True, "state": "success", "off_cm": 4, "off_deg": 2.0}
     assert [e["step"] for e in events] == ["translate", "turn", "success"]
 
 
-def test_turn_is_degrees_left_sent_as_radians():
-    import math
+def test_navigate_turn_only_is_degrees_left_sent_as_radians():
     call = fake_walk_executor([{"state": "success", "error": {"pos_m": 0.0, "yaw_deg": 1.0}}])
-    out = ag.tool_turn({"degrees": -90}, collect()[1], threading.Event(), call=call, poll_s=0)
-    assert call.sent[0] == {"op": "goto", "dx": 0.0, "dy": 0.0, "dyaw": math.radians(-90)}
+    out = ag.tool_navigate({"turn_deg": -90}, collect()[1], threading.Event(), call=call,
+                           poll_s=0)
+    assert call.sent[0] == {"op": "goto", "dx": 0.0, "dy": 0.0,
+                            "dyaw": round(math.radians(-90), 4)}
     assert out["ok"] is True
 
 
-def test_walk_stop_cancels_it_on_the_robot():
+def test_navigate_says_when_it_is_blocked_and_when_it_goes_on():
+    call = fake_walk_executor([
+        {"state": "running", "phase": "translate"},
+        {"state": "running", "phase": "translate",
+         "blocked": {"reason": "something is in the way: waiting for it to clear"}},
+        {"state": "running", "phase": "translate", "blocked": None},
+        {"state": "success", "error": {"pos_m": 0.2, "yaw_deg": 3.0}},
+    ])
+    events, emit = collect()
+    ag.tool_navigate({"forward_m": 3}, emit, threading.Event(), call=call, poll_s=0)
+    assert [e["step"] for e in events] == ["translate", "blocked", "going on", "success"]
+
+
+def test_navigate_stop_cancels_it_on_the_robot():
     call = fake_walk_executor([{"state": "running", "phase": "translate"},
                                {"state": "cancelled", "reason": "cancel from the agent"}])
     stop = threading.Event()
     stop.set()
-    out = ag.tool_walk({"forward_m": 1}, collect()[1], stop, call=call, poll_s=0)
+    out = ag.tool_navigate({"forward_m": 1}, collect()[1], stop, call=call, poll_s=0)
     assert {"op": "cancel"} in call.sent
     assert out["ok"] is False and out["state"] == "cancelled"
 
 
 @pytest.mark.parametrize("args, why", [
     ({"forward_m": "lejos"}, "numbers"),
-    ({"forward_m": 9}, "at most 3 m per request"),
+    ({}, "nowhere to go"),
+    ({"forward_m": 12}, "at most 10 m"),
 ])
-def test_walk_refusals_reach_the_model(args, why):
-    call = fake_walk_executor([], refuse="at most 3 m per request")
-    out = ag.tool_walk(args, collect()[1], threading.Event(), call=call, poll_s=0)
+def test_navigate_refusals_reach_the_model(args, why):
+    call = fake_walk_executor([], refuse="at most 10 m per walk")
+    out = ag.tool_navigate(args, collect()[1], threading.Event(), call=call, poll_s=0)
     assert out["ok"] is False and why in out["error"]
+
+
+# navigate to something it sees: found and measured (locate_seen), then walked to
+def test_goal_toward_stops_short_of_the_thing_facing_it():
+    fwd, left, turn = ag.goal_toward(2.6, 0.0)
+    assert (fwd, left, turn) == pytest.approx((2.0, 0.0, 0.0))
+    fwd, left, turn = ag.goal_toward(2.0, 2.0)                  # 45 deg to the left
+    assert math.hypot(fwd, left) == pytest.approx(math.hypot(2, 2) - ag.NAV_STANDOFF_M)
+    assert turn == pytest.approx(45.0) and fwd > 0 and left > 0
+    assert ag.goal_toward(0.7, -0.1)[:2] == (0.0, 0.0)          # close already: only turn
+
+
+def test_navigate_to_a_target_walks_to_where_it_was_seen():
+    call = fake_walk_executor([{"state": "success", "error": {"pos_m": 0.1, "yaw_deg": 2.0}}])
+    events, emit = collect()
+    out = ag.tool_navigate({"target": "la silla"}, emit, threading.Event(), call=call, poll_s=0,
+                           locate=lambda phrase: ((3.0, 0.0), "yolo chair, chosen by the vlm"))
+    assert call.sent[0] == {"op": "goto", "dx": 2.4, "dy": 0.0, "dyaw": 0.0}
+    assert out["ok"] is True
+    assert [e["step"] for e in events][:2] == ["looking", "seen"]
+    assert "3.0 m away" in events[1]["detail"]
+
+
+def test_navigate_to_a_target_not_in_sight_tells_the_model_and_does_not_move():
+    call = fake_walk_executor([])
+    out = ag.tool_navigate({"target": "la puerta"}, collect()[1], threading.Event(), call=call,
+                           poll_s=0, locate=lambda phrase: (None, "I do not see la puerta"))
+    assert out == {"ok": False, "error": "I do not see la puerta"} and not call.sent
+
+
+def test_navigate_to_a_target_right_in_front_does_not_walk():
+    call = fake_walk_executor([])
+    out = ag.tool_navigate({"target": "vos"}, collect()[1], threading.Event(), call=call,
+                           poll_s=0, locate=lambda phrase: ((0.65, 0.02), "yolo person"))
+    assert out["ok"] is True and out["state"] == "already there" and not call.sent
+
+
+# command — one of the robot's built-in moves, checked like the command interpreter's
+def test_command_offers_the_safe_moves_and_not_walking_or_dangerous_ones():
+    names = ag.command_skills()
+    assert {"wave_hand", "shake_hand", "arm_action", "sit", "stop"} <= set(names)
+    assert not {"walk", "turn", "damp", "zero_torque", "dance", "set_fsm_id", "unknown"} & set(names)
+    assert "clap" in ag._tools_text()                            # the arm actions are listed
+
+
+def test_command_sends_a_checked_skill_with_safe_mode():
+    sent = []
+
+    def call(body):
+        sent.append(body)
+        return {"ok": True}
+    events, emit = collect()
+    out = ag.tool_command({"skill": "arm_action", "params": {"action": "clap", "bogus": 1}},
+                          emit, threading.Event(), call=call)
+    assert out == {"ok": True, "skill": "arm_action"}
+    assert sent == [{"skill": "arm_action", "params": {"action": "clap"}}]
+    assert events[0]["step"] == "arm_action"
+
+
+@pytest.mark.parametrize("skill", ["damp", "walk", "volar", ""])
+def test_command_refuses_what_it_does_not_offer_without_calling_the_robot(skill):
+    sent = []
+    out = ag.tool_command({"skill": skill}, collect()[1], threading.Event(),
+                          call=lambda b: sent.append(b) or {"ok": True})
+    assert out["ok"] is False and "no move" in out["error"] and not sent
+
+
+def test_command_failures_reach_the_model():
+    out = ag.tool_command({"skill": "wave_hand"}, collect()[1], threading.Event(),
+                          call=lambda b: {"ok": False, "error": "the robot is not standing"})
+    assert out == {"ok": False, "skill": "wave_hand", "error": "the robot is not standing"}

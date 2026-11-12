@@ -20,6 +20,7 @@ next step depends on whether the last one worked — a failed pick is reported, 
 from __future__ import annotations
 
 import json
+import math
 import threading
 import time
 
@@ -38,18 +39,23 @@ TOOLS = {
                 "lifts it, puts it back where it was and brings the arm home. MOVES THE ROBOT. "
                 "Only objects standing on the table, about the size of a bottle or a cup.",
     },
-    "walk": {
-        "args": {"forward_m": "metres to walk forward (negative = back), at most 3",
-                 "left_m": "metres to step sideways to its left (negative = right), usually 0"},
-        "does": "Walks the robot by itself in a straight line, keeping the way it faces. MOVES "
-                "THE ROBOT. It cannot see obstacles, so only short, clear walks. Use it to step "
-                "closer to the table. To turn, use turn.",
+    "navigate": {
+        "args": {"target": "a thing it can see now, in words ('the chair', 'that person'): it "
+                           "walks up to it and stops in front, facing it. Leave it out to go "
+                           "by metres instead",
+                 "forward_m": "metres forward (negative = back), at most 10",
+                 "left_m": "metres to its left (negative = right), usually 0",
+                 "turn_deg": "degrees to turn, at most 180: LEFT is positive, RIGHT is negative "
+                             "('turn right' = -90, 'turn left' = 90, 'turn around' = 180)"},
+        "does": "Walks the robot by itself, going round obstacles and people, up to 10 m. MOVES "
+                "THE ROBOT. Give a target it can see, or forward_m/left_m (and turn_deg to face "
+                "another way at the end); only turn_deg turns it in place. If the target is not "
+                "in sight, turn and look first.",
     },
-    "turn": {
-        "args": {"degrees": "how far to turn in place, at most 180: LEFT is positive, RIGHT is "
-                            "negative ('turn right' = -90, 'turn left' = 90, 'turn around' = 180)"},
-        "does": "Turns the robot in place. MOVES THE ROBOT. For 'turn and walk', call turn first "
-                "and then walk; for 'walk and turn', walk first.",
+    "command": {
+        "args": {"skill": "one of the robot's own moves below",
+                 "params": "an object with that move's parameters, e.g. {\"action\": \"clap\"}"},
+        "does": "One of the robot's built-in moves. MOVES THE ROBOT. The moves: {skills}",
     },
     "place": {
         "args": {"object": "the thing to move, in words, e.g. 'the water bottle'",
@@ -63,12 +69,42 @@ TOOLS = {
 
 def _tools_text():
     return "\n".join(f"- {name}({', '.join(f'{a}: {d}' for a, d in t['args'].items())}): "
-                     f"{t['does']}" for name, t in TOOLS.items())
+                     f"{t['does']}".replace("{skills}", _skills_text())
+                     for name, t in TOOLS.items())
+
+
+# The command tool's moves: the command interpreter's G1 catalog (command_common, the single
+# source of truth), minus what is not the agent's to do. Out: navigate's walking and turning;
+# the skills safe mode holds back (they drop the robot or swap its controller) and the hidden
+# raw ones; getting up off the floor and the stair controller, which only an operator who sees
+# the robot should start.
+COMMAND_LEFT_OUT = {"walk", "turn", "unknown", "lie_up", "climb"}
+
+
+def command_skills():
+    """{name: skill spec} the agent's command tool offers."""
+    import command_common as cc
+    cat = cc.catalog("g1")
+    out = set(cat["dangerous"]) | COMMAND_LEFT_OUT
+    return {n: s for n, s in cat["skills"].items() if n not in out and not s.get("hidden")}
+
+
+def _skills_text():
+    parts = []
+    for name, s in command_skills().items():
+        ps = []
+        for pname, p in s["params"].items():
+            if "values" in p:
+                ps.append(f"{pname}: one of {', '.join(p['values'])}")
+            elif p.get("type") == "bool":
+                ps.append(f"{pname}: true/false")
+        parts.append(f"{name} ({s.get('label') or name}{'; ' + '; '.join(ps) if ps else ''})")
+    return "; ".join(parts) + "."
 
 
 PLAN_SYSTEM = (
-    "You control a Unitree G1 humanoid robot, usually standing at a table. It can walk short "
-    "distances by itself. You can use these tools:\n"
+    "You control a Unitree G1 humanoid robot. It walks around the room by itself, going round "
+    "obstacles and people. You can use these tools:\n"
     "{tools}\n"
     "Read the instruction and answer ONLY JSON: {{\"understood\": what is being asked, in one "
     "short line, \"plan\": [the steps, each a few words], \"needs_robot\": true or false}}. "
@@ -76,8 +112,8 @@ PLAN_SYSTEM = (
     "Write understood and the plan in the language of the instruction.")
 
 STEP_SYSTEM = (
-    "You control a Unitree G1 humanoid robot, usually standing at a table; it can walk short "
-    "distances by itself. Tools:\n"
+    "You control a Unitree G1 humanoid robot; it walks around the room by itself, going round "
+    "obstacles and people. Tools:\n"
     "{tools}\n"
     "You are carrying out the instruction step by step. Given what has happened so far, answer "
     "ONLY JSON, one of:\n"
@@ -191,34 +227,91 @@ WALK_POLL_S = 0.4
 WALK_RUNNING = ("starting", "running")
 
 
-def tool_walk(args, emit, stop, call=None, poll_s=WALK_POLL_S):
-    """Walk in a straight line relative to where the robot stands, to its end."""
-    try:
-        fwd, left = (float(args.get(k) or 0) for k in ("forward_m", "left_m"))
-    except (TypeError, ValueError):
-        return {"ok": False, "error": "forward_m and left_m must be numbers"}
-    return _walk("walk", fwd, left, 0.0, emit, stop, call, poll_s)
+# NAVIGATE (2026-11-12): one tool for walking, replacing walk and turn — the robot walks with
+# Nav2 now (it sees and goes round things, up to the relay's 10 m), and two tools for one job
+# were two chances for the small model to pick wrong. A target in words is found the way pick
+# finds things (locate_object: YOLO finds, the VLM chooses, the depth camera measures) and the
+# robot stops NAV_STANDOFF_M in front of it, facing it.
+NAV_STANDOFF_M = 0.6
+NAV_ARRIVED_M = 0.15          # closer than this to the stopping point: only turn to face it
+NAV_FACING_DEG = 8.0          # ... and not even that when it already faces it
+NAV_MAX_BOXES = 12            # YOLO's most confident, numbered for the VLM to choose from
 
 
-def tool_turn(args, emit, stop, call=None, poll_s=WALK_POLL_S):
-    """Turn in place, `degrees` left (negative = right), to its end."""
-    try:
-        degrees = float(args.get("degrees") or 0)
-    except (TypeError, ValueError):
-        return {"ok": False, "error": "degrees must be a number"}
-    return _walk("turn", 0.0, 0.0, degrees, emit, stop, call, poll_s)
+def goal_toward(x, y, standoff=NAV_STANDOFF_M):
+    """(forward_m, left_m, turn_deg) to stop `standoff` short of the point (x forward, y left
+    of the robot, metres), facing it. Nothing to walk when it is closer than that already."""
+    r = math.hypot(x, y)
+    bearing = math.atan2(y, x)
+    d = r - standoff
+    if d < NAV_ARRIVED_M:
+        return 0.0, 0.0, math.degrees(bearing)
+    return d * math.cos(bearing), d * math.sin(bearing), math.degrees(bearing)
+
+
+def locate_seen(phrase):
+    """(x forward, y left) in metres of `phrase` in the robot's camera, and how it was found;
+    (None, why) when it is not in sight or cannot be measured."""
+    import locate_object as lo
+    import perception3d as p3
+    cal = p3.load_calibration(lo.CALIBRATION)
+    z, info = lo.fetch_depth(frames=5)
+    frame = lo.grab_color()
+    boxes = sorted(lo.yolo_boxes(frame, None), key=lambda b: -b[2])[:NAV_MAX_BOXES]
+    i = lo.vlm_choose(frame, boxes, phrase) if boxes else None
+    if i is not None:
+        box, how = boxes[i][0], f"yolo {boxes[i][1]}, chosen by the vlm"
+    else:
+        box, how = lo.vlm_box(frame, phrase), "the vlm's own box"
+    if box is None:
+        return None, f"I do not see {phrase}"
+    h, w = frame.shape[:2]
+    r = p3.locate(z, box, cal, color_size=(w, h), scale_m=info.get("scale_m", 0.001))
+    if not r.get("ok"):
+        return None, f"I see {phrase} but cannot tell how far it is ({r.get('error')})"
+    return (float(r["torso"][0]), float(r["torso"][1])), how
+
+
+def tool_navigate(args, emit, stop, call=None, poll_s=WALK_POLL_S, locate=None):
+    """Walk to a target seen in words, or by metres and degrees, to the walk's end."""
+    target = str(args.get("target") or "").strip()
+    if target:
+        locate = locate or locate_seen
+        emit({"type": "tool_event", "tool": "navigate", "step": "looking",
+              "detail": f"looking for {target}"})
+        try:
+            where, how = locate(target)
+        except Exception as exc:                 # no depth snapshot, no camera
+            return {"ok": False, "error": f"could not look: {exc}"}
+        if where is None:
+            return {"ok": False, "error": how}
+        fwd, left, turn = goal_toward(*where)
+        emit({"type": "tool_event", "tool": "navigate", "step": "seen",
+              "detail": f"{target}: {math.hypot(*where):.1f} m away, "
+                        f"{abs(turn):.0f} deg {'left' if turn >= 0 else 'right'} ({how})"})
+        if fwd == left == 0.0 and abs(turn) < NAV_FACING_DEG:
+            return {"ok": True, "state": "already there", "distance_m": round(math.hypot(*where), 2)}
+    else:
+        try:
+            fwd, left, turn = (float(args.get(k) or 0)
+                               for k in ("forward_m", "left_m", "turn_deg"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "forward_m, left_m and turn_deg must be numbers"}
+        if not (fwd or left or turn):
+            return {"ok": False, "error": "nowhere to go: give a target, or metres or degrees"}
+    return _walk("navigate", fwd, left, turn, emit, stop, call, poll_s)
 
 
 def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
     """One walk to a point (the relay's Walk, on the robot), followed to its end. `stop` (the
     STOP button) cancels it on the robot. The limits are the relay's: a refusal comes back as
     the tool's error, for the model to read."""
-    import math
     call = call or _executor_walk
-    out = call({"op": "goto", "dx": fwd, "dy": left, "dyaw": math.radians(turn)})
+    out = call({"op": "goto", "dx": round(fwd, 3), "dy": round(left, 3),
+                "dyaw": round(math.radians(turn), 4)})
     if not out.get("ok"):
         return {"ok": False, "error": out.get("error") or "the robot refused the walk"}
-    phase = None
+    phase, blocked = None, False
     while True:
         if stop.is_set():
             call({"op": "cancel"})
@@ -226,7 +319,13 @@ def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
         if w.get("phase") and w.get("phase") != phase and w.get("state") in WALK_RUNNING:
             phase = w["phase"]
             emit({"type": "tool_event", "tool": tool, "step": phase,
-                  "detail": "straight to the point" if phase == "translate" else "turning"})
+                  "detail": "on its way" if phase == "translate" else "turning"})
+        if bool(w.get("blocked")) != blocked and w.get("state") in WALK_RUNNING:
+            blocked = bool(w.get("blocked"))
+            why = ((w.get("blocked") or {}).get("reason") or "something is in the way"
+                   if blocked else "the way is clear again")
+            emit({"type": "tool_event", "tool": tool, "step": "blocked" if blocked else "going on",
+                  "detail": why})
         if w.get("state") not in WALK_RUNNING:
             err = w.get("error") or {}
             emit({"type": "tool_event", "tool": tool, "step": w.get("state") or "unknown",
@@ -239,8 +338,46 @@ def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
         time.sleep(poll_s)
 
 
-TOOL_FNS = {"look": tool_look, "pick": tool_pick, "place": tool_place, "walk": tool_walk,
-            "turn": tool_turn}
+def _executor_execute(body, timeout=20):
+    """POST the executor's /execute: one skill, with safe mode ON whatever the page says."""
+    import json as _json
+    import urllib.error
+    import urllib.request
+
+    import manipulation
+    req = urllib.request.Request(f"{manipulation.EXECUTOR_URL}/execute",
+                                 data=_json.dumps({**body, "robot": "g1", "safe_mode": True}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return _json.loads(r.read() or b"{}")
+    except urllib.error.HTTPError as exc:
+        try:
+            out = _json.loads(exc.read() or b"{}")
+        except ValueError:
+            out = {}
+        return {"ok": False, "error": out.get("error") or f"HTTP {exc.code}", **out}
+
+
+def tool_command(args, emit, stop, call=None):
+    """One of the robot's built-in moves (command_skills), checked the way the command
+    interpreter checks its own: unknown names and parameters never reach the robot."""
+    import command_common as cc
+    call = call or _executor_execute
+    skill = str(args.get("skill") or "").strip()
+    if skill not in command_skills():
+        return {"ok": False, "error": f"no move '{skill}': use one of {sorted(command_skills())}"}
+    params = args.get("params") if isinstance(args.get("params"), dict) else {}
+    intent = cc.normalize_intent({"skill": skill, "params": params}, robot="g1")
+    emit({"type": "tool_event", "tool": "command", "step": skill,
+          "detail": ", ".join(f"{k}={v}" for k, v in intent["params"].items()) or "no parameters"})
+    out = call({"skill": intent["skill"], "params": intent["params"]})
+    return {"ok": bool(out.get("ok")), "skill": skill,
+            **({"error": out["error"]} if out.get("error") else {})}
+
+
+TOOL_FNS = {"look": tool_look, "pick": tool_pick, "place": tool_place,
+            "navigate": tool_navigate, "command": tool_command}
 
 
 # --------------------------------------------------------------------------- #
