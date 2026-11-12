@@ -16,6 +16,12 @@ knows a word list: what to do is the model's call, what each tool does is the to
 
 Tools, as the model sees them, are TOOLS below. A tool's result goes back to the model, so the
 next step depends on whether the last one worked — a failed pick is reported, not hidden.
+
+The conversation so far rides on every instruction (2026-11-12, as the vision chat does since
+2026-10-28): each earlier turn is what was asked, what the robot did with its tools and what it
+answered, the newest that fit HISTORY_CHARS. So "ahora dejala en la mesa" knows which bottle
+it is holding. It is context only: the model is told the instruction to carry out is the last
+one, never to do an earlier one again.
 """
 from __future__ import annotations
 
@@ -27,6 +33,12 @@ import time
 from vlm_common import LLAMACPP_HOST, extract_json, stream_chat
 
 MAX_STEPS = 6
+# Characters of earlier turns sent with an instruction. The model's window is 4096 tokens
+# (~14 000 characters at 3.5 a token, vlm_common.CHARS_PER_TOKEN) for the system message and its
+# tool list (~3 000), this run's own steps (up to ~2 500) and the answer (300 tokens): about
+# 4 000 are left for the conversation.
+HISTORY_CHARS = 4000
+HISTORY_DONE_MAX = 8      # tool uses kept per earlier turn
 TOOLS = {
     "look": {
         "args": {"question": "what to ask about what the robot's camera sees now"},
@@ -123,6 +135,31 @@ STEP_SYSTEM = (
     "{{\"thought\": why, \"reply\": what to tell the person}} when it is done, impossible, or "
     "only needed words. Never claim something worked unless a tool result says so. Reply in the "
     "language of the instruction, short and plain.")
+
+
+def history_text(history, budget=HISTORY_CHARS):
+    """[{"question", "answer", "done": [..]}] oldest first -> the newest turns that fit `budget`
+    characters, as text for the prompt ("" with none). A turn with neither an answer nor
+    anything done is skipped."""
+    blocks = []
+    used = 0
+    for turn in reversed(history or []):
+        turn = turn or {}
+        q = str(turn.get("question") or "").strip()
+        a = str(turn.get("answer") or "").strip()
+        done = [str(d).strip() for d in (turn.get("done") or [])[:HISTORY_DONE_MAX] if str(d).strip()]
+        if not q or not (a or done):
+            continue
+        lines = [f"Person: {q}"] + [f"  did: {d}" for d in done] + ([f"Robot: {a}"] if a else [])
+        block = "\n".join(lines)
+        if used + len(block) + 1 > budget:
+            break
+        used += len(block) + 1
+        blocks.append(block)
+    if not blocks:
+        return ""
+    return ("Earlier in this conversation (context only, oldest first; do NOT do any of it "
+            "again):\n" + "\n".join(reversed(blocks)) + "\n\n")
 
 
 def llm_json(system, user, url=LLAMACPP_HOST, max_tokens=300, image_b64=None):
@@ -389,7 +426,8 @@ class ModelDown(RuntimeError):
     pass
 
 
-def run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_STEPS):
+def run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_STEPS,
+        history=None):
     """See _run. A language model that stops answering ends the run with an error event and a
     plain reply, never an exception out of the stream."""
     def safe_llm(system, user):
@@ -398,7 +436,7 @@ def run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_ST
         except Exception as exc:
             raise ModelDown(f"{type(exc).__name__}: {exc}") from None
     try:
-        return _run(instruction, emit, stop, safe_llm, tools, max_steps)
+        return _run(instruction, emit, stop, safe_llm, tools, max_steps, history)
     except ModelDown as exc:
         emit({"type": "error", "text": f"the language model is not answering ({exc})"[:300]})
         reply = "El modelo de lenguaje no responde. / The language model is not answering."
@@ -406,26 +444,30 @@ def run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_ST
         return reply
 
 
-def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_STEPS):
+def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_STEPS,
+         history=None):
     """Carry out `instruction`, emitting every step. Returns the final reply (also emitted).
+    `history`: the conversation so far (history_text), sent with every call to the model.
 
     `llm(system, user)` -> dict and `tools` {name: fn(args, emit, stop)} are injectable, so the
     loop is tested without a model or a robot."""
     stop = stop or threading.Event()
     tools = tools or TOOL_FNS
     emit({"type": "heard", "text": instruction})
-    plan = llm(PLAN_SYSTEM.format(tools=_tools_text()), instruction)
+    earlier = history_text(history)
+    plan = llm(PLAN_SYSTEM.format(tools=_tools_text()),
+               f"{earlier}Instruction now: {instruction}" if earlier else instruction)
     understood = str(plan.get("understood") or instruction)
     steps = [str(s) for s in plan.get("plan") or [] if str(s).strip()]
     emit({"type": "understood", "text": understood})
     if steps:
         emit({"type": "plan", "steps": steps})
-    history = [f"Instruction: {instruction}", f"Understood: {understood}",
-               f"Plan: {'; '.join(steps) or '(none)'}"]
+    steps_so_far = [f"Instruction: {instruction}", f"Understood: {understood}",
+                    f"Plan: {'; '.join(steps) or '(none)'}"]
     for _ in range(max_steps):
         if stop.is_set():
             break
-        step = llm(STEP_SYSTEM.format(tools=_tools_text()), "\n".join(history))
+        step = llm(STEP_SYSTEM.format(tools=_tools_text()), earlier + "\n".join(steps_so_far))
         thought = str(step.get("thought") or "").strip()
         if thought:
             emit({"type": "thought", "text": thought})
@@ -436,7 +478,7 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
         name = step.get("tool")
         args = step.get("args") if isinstance(step.get("args"), dict) else {}
         if name not in tools:
-            history.append(f"Error: there is no tool '{name}'. Use one of {list(tools)} "
+            steps_so_far.append(f"Error: there is no tool '{name}'. Use one of {list(tools)} "
                            f"or reply.")
             emit({"type": "error", "text": f"no tool '{name}'"})
             continue
@@ -446,14 +488,14 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
         except Exception as exc:                 # the trace says it, the model is told
             result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         emit({"type": "tool_result", "tool": name, "result": result})
-        history.append(f"Used {name}({json.dumps(args, ensure_ascii=False)}) -> "
+        steps_so_far.append(f"Used {name}({json.dumps(args, ensure_ascii=False)}) -> "
                        f"{json.dumps(result, ensure_ascii=False)}")
     # The last words are the model's too, in the instruction's language; the fixed text is only
     # for a model that gave none, and is in both of the app's languages.
     why = ("the person pressed STOP" if stop.is_set() else
            f"you used all {max_steps} steps without finishing")
     end = llm(STEP_SYSTEM.format(tools=_tools_text()),
-              "\n".join([*history, f"You must stop now: {why}. Reply to the person."]))
+              earlier + "\n".join([*steps_so_far, f"You must stop now: {why}. Reply to the person."]))
     reply = str(end.get("reply") or "").strip() or (
         "Me detuve. / Stopped." if stop.is_set() else
         "No pude terminarlo. / I could not finish it.")

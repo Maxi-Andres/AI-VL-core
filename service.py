@@ -47,6 +47,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
+from typing import Annotated
 
 # The detection logic lives in src/ within THIS repo (a local file import, not a
 # cross-app dependency). Put it on the path like menu.py does.
@@ -57,7 +58,7 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from PIL import Image
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 import agent_common
 import asr_common
@@ -713,8 +714,19 @@ def actions_cancel_all():
     return {"ok": True}
 
 
+class AgentTurn(BaseModel):
+    """One earlier turn of the agent's conversation: what was asked, what it did, its answer."""
+    question: str = Field("", max_length=1000)
+    answer: str = Field("", max_length=4000)
+    done: list[Annotated[str, StringConstraints(max_length=300)]] = Field(default_factory=list,
+                                                                       max_length=12)
+
+
 class AgentRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=1000, description="the instruction")
+    # The conversation so far, oldest first; the newest turns that fit go along as text
+    # (agent_common.history_text).
+    history: list[AgentTurn] = Field(default_factory=list, max_length=50)
 
 
 _AGENT = {"stop": None}
@@ -736,7 +748,8 @@ def agent(req: AgentRequest):
 
     def work():
         try:
-            agent_common.run(req.text.strip(), events.put, stop=stop)
+            agent_common.run(req.text.strip(), events.put, stop=stop,
+                             history=[t.model_dump() for t in req.history])
         except Exception as e:                   # the trace says it
             events.put({"type": "error", "text": f"{type(e).__name__}: {e}"})
         finally:

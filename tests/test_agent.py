@@ -317,3 +317,46 @@ def test_command_failures_reach_the_model():
     out = ag.tool_command({"skill": "wave_hand"}, collect()[1], threading.Event(),
                           call=lambda b: {"ok": False, "error": "the robot is not standing"})
     assert out == {"ok": False, "skill": "wave_hand", "error": "the robot is not standing"}
+
+
+# --------------------------------------------------------------------------- #
+# The conversation so far (2026-11-12): "ahora dejala en la mesa" after "agarrá la botella"
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("earlier, now", [
+    ({"question": "agarrá la botella", "answer": "Listo, la tengo.",
+      "done": ["pick(object=botella) -> ok"]}, "ahora dejala en la mesa"),
+    ({"question": "pick up the bottle", "answer": "Done, I have it.",
+      "done": ["pick(object=bottle) -> ok"]}, "now put it on the table"),
+])
+def test_the_conversation_so_far_goes_with_every_call_to_the_model(earlier, now):
+    """Defect: each instruction ran alone, so "it" after "pick up the bottle" meant nothing."""
+    _events, emit = collect()
+    llm = scripted({"understood": "place it", "plan": ["place"], "needs_robot": True},
+                   {"thought": "place", "tool": "place", "args": {"target": "table"}},
+                   {"reply": "ok"})
+    ag.run(now, emit, llm=llm, tools={"place": lambda a, e, s: {"ok": True}}, history=[earlier])
+    for told in llm.seen:                    # the plan, and every step
+        assert earlier["question"] in told and earlier["answer"] in told
+        assert earlier["done"][0] in told
+        assert "do NOT do any of it again" in told
+    assert llm.seen[0].endswith(f"Instruction now: {now}")
+
+
+def test_without_a_conversation_the_prompts_are_as_before():
+    _events, emit = collect()
+    llm = scripted({"understood": "hi", "plan": []}, {"reply": "hola"})
+    ag.run("hola", emit, llm=llm, tools={}, history=[])
+    assert llm.seen[0] == "hola"
+    assert llm.seen[1].startswith("Instruction: hola")
+
+
+def test_only_the_newest_turns_that_fit_go_and_empty_ones_are_skipped():
+    """Defect it prevents: a long conversation overflowing the model's 4096-token window."""
+    turns = [{"question": f"q{i} " + "x" * 300, "answer": f"a{i}"} for i in range(40)]
+    turns.append({"question": "stopped before anything", "answer": "", "done": []})
+    text = ag.history_text(turns)
+    assert len(text) <= ag.HISTORY_CHARS + 200
+    assert "a39" in text and "a0\n" not in text
+    assert "stopped before anything" not in text
+    assert text.index("q38") < text.index("q39")             # oldest first
+    assert ag.history_text([]) == ""
