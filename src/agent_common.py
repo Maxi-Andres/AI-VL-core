@@ -71,10 +71,10 @@ TOOLS = {
                 "in sight, turn and look first.",
     },
     "command": {
-        "args": {"skill": "the name of one of the moves below",
-                 "params": "that move's parameters, e.g. to clap: skill \"arm_action\" with "
-                           "params {\"action\": \"clap\"}"},
-        "does": "One of the robot's built-in moves. MOVES THE ROBOT. The moves: {skills}",
+        "args": {"move": "the move as the person said it, in their own words, copied (e.g. "
+                         "'levantá la mano izquierda'); or a move's name below, with its value"},
+        "does": "One of the robot's built-in moves, the same ones the drive pad has. MOVES THE "
+                "ROBOT. The moves: {skills}{held_back}",
     },
     "search": {
         "args": {"query": "what to look up, in a few words, e.g. 'clima Buenos Aires hoy'"},
@@ -102,25 +102,116 @@ TOOLS = {
 def _tools_text():
     return "\n".join(f"- {name}({', '.join(f'{a}: {d}' for a, d in t['args'].items())}): "
                      f"{t['does']}".replace("{skills}", _skills_text())
+                     .replace("{held_back}", _held_back_text())
                      for name, t in TOOLS.items())
 
 
-# The command tool's moves: the command interpreter's G1 catalog (command_common, the single
-# source of truth), minus what is not the agent's to do. Out: navigate's walking and turning;
-# the skills safe mode holds back (they drop the robot or swap its controller) and the hidden
-# raw ones; getting up off the floor and the stair controller, which only an operator who sees
-# the robot should start; and the walk/run controllers: the mode is the operator's (Nav2 walks
-# in Run at the Slow speed, 2026-11-11 — in Walk the G1 marks time at that speed).
-COMMAND_LEFT_OUT = {"walk", "turn", "unknown", "lie_up", "climb",
-                    "start", "run", "run_waist", "walk_waist"}
+# The command tool's moves: everything the drive pad can send the G1, minus what safe mode holds
+# back (2026-11-13, "todas las opciones del drive, menos las del safe mode"). Nothing is listed by
+# hand: the moves are the command interpreter's G1 catalog (command_common, the single source of
+# truth) less its `dangerous` and `hidden` skills, narrowed to what the robot's transport
+# delivers right now — the same answer the pad strikes its buttons out with (the executor's GET
+# /transport: over the relay only its verbs get through, e.g. one walk mode of the waist pair,
+# and no high five). Only two things are left out on purpose: walk and turn, which navigate does
+# with Nav2 going round obstacles (they would move the robot blind), and the interpreter's own
+# "unknown". The executor is always asked with safe mode ON, so a dangerous skill could not
+# reach the robot anyway.
+COMMAND_LEFT_OUT = {
+    "walk": "walking somewhere is the navigate tool's, going round obstacles (forward_m, "
+            "left_m); a walk MODE is a move",
+    "turn": "turning in place is the navigate tool's (turn_deg)",
+    "unknown": "it is not a move",
+}
+SENDABLE_TTL_S = 30.0     # how long the transport's answer is kept (the relay can be re-pulled)
+_SENDABLE = {"at": None, "value": None}
+
+
+def _fetch_sendable(get=None, timeout=6):
+    """What the G1's transport delivers, as the drive pad reads it: {"skills": {names}, "values":
+    {skill: {param: [values]}}}; None when everything gets through (DDS) or the executor did not
+    answer (then the executor itself refuses what cannot be sent, and says why)."""
+    def _get():
+        import urllib.request
+
+        import manipulation
+        with urllib.request.urlopen(f"{manipulation.EXECUTOR_URL}/transport", timeout=timeout) as r:
+            return json.loads(r.read() or b"{}")
+    try:
+        g1 = ((get or _get)().get("transports") or {}).get("g1") or {}
+    except Exception:
+        return None
+    if not isinstance(g1.get("allowed_skills"), list):
+        return None
+    return {"skills": set(g1["allowed_skills"]), "values": g1.get("allowed_values") or {}}
+
+
+def sendable(now=None):
+    """_fetch_sendable, kept SENDABLE_TTL_S: the tool list is built for every step of a run."""
+    now = time.monotonic() if now is None else now
+    if _SENDABLE["at"] is None or now - _SENDABLE["at"] > SENDABLE_TTL_S:
+        _SENDABLE.update(at=now, value=_fetch_sendable())
+    return _SENDABLE["value"]
 
 
 def command_skills():
-    """{name: skill spec} the agent's command tool offers."""
+    """{name: skill spec} the agent's command tool offers: see COMMAND_LEFT_OUT. A choice
+    skill keeps only the values the transport delivers (and its labels and groups for them)."""
     import command_common as cc
     cat = cc.catalog("g1")
-    out = set(cat["dangerous"]) | COMMAND_LEFT_OUT
-    return {n: s for n, s in cat["skills"].items() if n not in out and not s.get("hidden")}
+    out = set(cat["dangerous"]) | set(COMMAND_LEFT_OUT)
+    can = sendable()
+    skills = {}
+    for name, s in cat["skills"].items():
+        if name in out or s.get("hidden") or (can is not None and name not in can["skills"]):
+            continue
+        params = {}
+        for pname, p in s["params"].items():
+            ok = ((can or {}).get("values") or {}).get(name, {}).get(pname)
+            if "values" in p and ok is not None:
+                p = {**p, "values": [v for v in p["values"] if v in ok]}
+                if p.get("groups"):
+                    p["groups"] = {g: [v for v in vs if v in ok] for g, vs in p["groups"].items()}
+            params[pname] = p
+        skills[name] = {**s, "params": params}
+    return skills
+
+
+def _held_back_text():
+    """The moves the robot has but safe mode holds back, by the catalog's labels: asked to
+    relax or dance, the agent said it did, with a stop or a clap (2026-11-13)."""
+    import command_common as cc
+    cat = cc.catalog("g1")
+    names = [s.get("label") or n for n, s in cat["skills"].items()
+             if n in cat["dangerous"] and not s.get("hidden")]
+    return (f" Safe mode holds back {', '.join(names)}: if asked for one, say you cannot do it "
+            "now, never do another move in its place." if names else "")
+
+
+def _plain_name(text):
+    return "".join(c for c in str(text).lower() if c.isalnum())
+
+
+def _value_text(v, labels):
+    """A value as the model reads it: its name, and the catalog's label when that says more
+    than the name ("clap (High five clap)", not "hug (Hug)") — the label is the phone app's
+    word, the name alone hid that clap IS the high five (2026-11-12)."""
+    label = (labels or {}).get(v)
+    return f"{v} ({label})" if label and _plain_name(label) != _plain_name(v) else v
+
+
+def _values_text(p):
+    """One choice param's values; grouped by the catalog's groups when it has them (the arm
+    actions, by the mode each needs), so the model knows to switch modes first."""
+    labels = p.get("labels")
+    groups = [(g, vs) for g, vs in (p.get("groups") or {}).items() if vs]
+    if not groups:
+        return "one of " + "|".join(_value_text(v, labels) for v in p["values"])
+    placed = {v for _g, vs in groups for v in vs}
+    rest = [v for v in p["values"] if v not in placed]
+    parts = [f"needing {g}: " + "|".join(_value_text(v, labels) for v in vs) for g, vs in groups]
+    if rest:
+        parts.append("others: " + "|".join(_value_text(v, labels) for v in rest))
+    return "one of (" + "; ".join(parts) + ")"
 
 
 def _skills_text():
@@ -132,9 +223,9 @@ def _skills_text():
         ps = []
         for pname, p in s["params"].items():
             if "values" in p:
-                ps.append(f'"{pname}": one of {"|".join(p["values"])}')
+                ps.append(f'"{pname}": {_values_text(p)}')
             elif p.get("type") == "bool":
-                ps.append(f'"{pname}": true or false')
+                ps.append(f'"{pname}": true or false' + (f" ({p['desc']})" if p.get("desc") else ""))
         label = s.get("label") or name
         parts.append(f'skill "{name}" ({label})' + (f" with params {{{', '.join(ps)}}}" if ps else ""))
     return "; ".join(parts) + "."
@@ -490,29 +581,155 @@ def _no_such_move(skill):
     of a move ("clap" is arm_action's action), it says which move and how to call it. Read off
     the catalog, nothing by hand: the model makes the call (2026-11-12: "Aplaudí" sent skill
     "clap", was told only the list of moves, and gave up)."""
-    owners = [(name, pname) for name, spec in command_skills().items()
+    import command_common as cc
+    moves = command_skills()
+    owners = [(name, pname) for name, spec in moves.items()
               for pname, p in spec["params"].items() if skill in (p.get("values") or [])]
     if owners:
-        how = " or ".join(f'{{"skill": "{n}", "params": {{"{pn}": "{skill}"}}}}' for n, pn in owners)
+        how = " or ".join(f"'{n} {skill}'" for n, _pn in owners)
         return f"'{skill}' is not a move but a value of a move's parameter: use {how}"
-    return f"no move '{skill}': use one of {sorted(command_skills())}"
+    if skill in COMMAND_LEFT_OUT:
+        return f"no move '{skill}': {COMMAND_LEFT_OUT[skill]}"
+    cat = cc.catalog("g1")
+    if skill in cat["skills"] or any(skill in (p.get("values") or [])
+                                     for s in cat["skills"].values()
+                                     for p in s["params"].values()):
+        return (f"'{skill}' cannot be done now: safe mode holds it back or the robot's link "
+                f"cannot send it. Say so, or use one of {sorted(moves)}")
+    return (f"'{skill}' is none of the moves that can be done now (safe mode holds back the "
+            f"ones that drop the robot, and the dances): say so, or use one of {sorted(moves)}")
 
 
-def tool_command(args, emit, stop, call=None):
+def _bad_value(skill, spec, params):
+    """Why a choice param's value cannot be sent ("" when every one can). The interpreter
+    would put the default in its place — a misheard value must not make the robot do something
+    else (arm_action falls back to release_arm)."""
+    for pname, p in spec["params"].items():
+        if "values" in p and pname in params and params[pname] not in p["values"]:
+            return (f"'{params[pname]}' is not a value of {skill}'s \"{pname}\" that can be sent "
+                    f"now; it takes {_values_text(p)}")
+    return ""
+
+
+def _interpret(words, moves):
+    """`words` -> {"skill", "params"} by the command interpreter (command_common.interpret,
+    the drive's voice commands' own), over `moves` only. It knows each move's description,
+    notes and examples, which the agent's prompt has no room for: "bajá los brazos" is
+    release_arm, "chocá los cinco" the clap (2026-11-13: the agent alone took them for a squat
+    and a look). The raw answer, before the interpreter swaps a bad value for the default."""
+    import command_common as cc
+    # The catalog's own entries — catalog() leaves out the notes and examples, and without them
+    # "bajá los brazos" was "down" (2026-11-13) — with the values narrowed to what can be sent.
+    full = cc.ROBOTS[cc._resolve("g1")]["skills"]
+    skills = {n: {**full.get(n, {}), **m, **{k: full[n][k] for k in ("notes", "examples")
+                                               if k in full.get(n, {})}}
+              for n, m in moves.items()}
+
+    def ask(text):
+        r = cc.interpret(text, "", robot="g1", url=LLAMACPP_HOST, num_ctx=4096, max_tokens=200,
+                         skills=skills)
+        parsed, ok = extract_json(r.get("content") or "")
+        return parsed if ok and isinstance(parsed, dict) else {}
+    got = ask(words)
+    # A value of its own ("mandame un beso" -> action "kiss", 2026-11-13): asked once more,
+    # told which word is not a value. Labels or a stricter rule in its prompt scored worse.
+    spec = moves.get(str(got.get("skill") or ""), {}).get("params", {})
+    params = got.get("params") if isinstance(got.get("params"), dict) else {}
+    bad = [(pn, v) for pn, v in params.items()
+           if "values" in spec.get(pn, {}) and v not in spec[pn]["values"]]
+    if bad:
+        pn, v = bad[0]
+        again = ask(f"{words}\n(\"{v}\" is not one of {pn}'s values: answer with the one of "
+                    f"them closest to what is asked.)")
+        got = again or got
+    return got
+
+
+def tool_command(args, emit, stop, call=None, interpret=None):
     """One of the robot's built-in moves (command_skills), checked the way the command
-    interpreter checks its own: unknown names and parameters never reach the robot."""
+    interpreter checks its own: unknown names and parameters never reach the robot. Given in
+    words ("move"), the interpreter picks the move; a {"skill", "params"} call that names no
+    move goes to it too, as words ("clap" is arm_action's clap)."""
     import command_common as cc
     call = call or _executor_execute
+    moves = command_skills()
     skill = str(args.get("skill") or "").strip()
     params = args.get("params") if isinstance(args.get("params"), dict) else {}
-    if skill not in command_skills():
-        return {"ok": False, "error": _no_such_move(skill)}
+    words = str(args.get("move") or "").strip()
+    if not (skill or words):     # {"action": "reject"}: what it said is the move, in words
+        words = " ".join(str(v) for v in [*args.values(), *params.values()]
+                         if isinstance(v, (str, int, float)) and not isinstance(v, bool)).strip()
+    # A move's name in "move", with its value or its params: the call, no question to ask.
+    name, _, value = words.partition(" ")
+    if not skill and name in moves:
+        choice = next((pn for pn, p in moves[name]["params"].items() if "values" in p), None)
+        if not value.strip():
+            skill, words = name, ""
+        elif choice and value.strip() in cc.catalog("g1")["skills"][name]["params"][choice]["values"]:
+            skill, params, words = name, {choice: value.strip()}, ""
+    if skill and skill not in moves and (skill in COMMAND_LEFT_OUT
+                                         or skill in cc.catalog("g1")["skills"]):
+        return {"ok": False, "error": _no_such_move(skill)}      # a move it may not do
+    if skill not in moves:
+        words = words or " ".join([skill, *(str(v) for v in params.values())]).strip()
+        if not words:
+            return {"ok": False, "error": "say which move, in words"}
+        emit({"type": "tool_event", "tool": "command", "step": "understanding", "detail": words})
+        try:
+            got = (interpret or _interpret)(words, moves)
+        except Exception as exc:                 # the model is down: say so, never guess
+            return {"ok": False, "error": f"could not understand the move ({exc})"[:300]}
+        heard = str(got.get("skill") or "").strip()
+        if heard in moves:
+            skill = heard
+            params = got.get("params") if isinstance(got.get("params"), dict) else {}
+        else:
+            return {"ok": False, "error": _no_such_move(skill or words)}
+    if why := _bad_value(skill, moves[skill], params):
+        return {"ok": False, "error": why}
     intent = cc.normalize_intent({"skill": skill, "params": params}, robot="g1")
     emit({"type": "tool_event", "tool": "command", "step": skill,
           "detail": ", ".join(f"{k}={v}" for k, v in intent["params"].items()) or "no parameters"})
     out = call({"skill": intent["skill"], "params": intent["params"]})
-    return {"ok": bool(out.get("ok")), "skill": skill,
+    return {"ok": bool(out.get("ok")), "skill": skill, **intent["params"],
             **({"error": out["error"]} if out.get("error") else {})}
+
+
+def move_hint(instruction, interpret=None):
+    """What the drive's command interpreter reads in `instruction`, over the whole catalog, as a
+    line for the agent ("" when it reads no move, or is not there to ask). The agent alone took
+    "bajá los brazos" for a squat and "levantá la mano derecha" for a wave, and said it could not
+    hug or kiss (2026-11-13: 29 of 48); the interpreter, with each move's description, notes and
+    examples, reads them right. The agent still decides: an instruction may need other tools."""
+    import command_common as cc
+    cat = cc.catalog("g1")
+    every = {n: s for n, s in cat["skills"].items() if not s.get("hidden") and n != "unknown"}
+    try:
+        got = (interpret or _interpret)(instruction, every)
+    except Exception:
+        return ""
+    skill = str(got.get("skill") or "")
+    params = got.get("params") if isinstance(got.get("params"), dict) else {}
+    if skill not in every:
+        return ""
+    label = every[skill].get("label") or skill
+    lead = f"The drive's command reader, which knows only the built-in moves, takes this for {label}"
+    if skill in COMMAND_LEFT_OUT:
+        return f"{lead}: {COMMAND_LEFT_OUT[skill]}.\n\n"
+    moves = command_skills()
+    if skill not in moves:
+        why = "safe mode holds it back" if skill in cat["dangerous"] else "the robot's link cannot send it"
+        return f"{lead}: {why}, so say you cannot do it now.\n\n"
+    choice = next((pn for pn, p in every[skill]["params"].items() if "values" in p), None)
+    value = params.get(choice) if choice else None
+    if choice and value not in moves[skill]["params"][choice]["values"]:
+        if value in every[skill]["params"][choice]["values"]:
+            return f"{lead} {value}: the robot's link cannot send it, so say you cannot do it now.\n\n"
+        return ""
+    if value:
+        label = _value_text(value, every[skill]["params"][choice].get("labels"))
+    call = f"{skill} {value}" if value else skill
+    return f"{lead}: the move '{call}' ({label}). If that is what is asked, use command with it.\n\n"
 
 
 TOOL_FNS = {"look": tool_look, "pick": tool_pick, "place": tool_place,
@@ -569,18 +786,26 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
     tools = tools or TOOL_FNS
     emit({"type": "heard", "text": instruction})
     earlier = about_now(notes, state) + history_text(history)
+    # Right under the instruction, where the 4B reads it: a line further up it skipped and
+    # "relajate" stood the robot up instead of saying safe mode holds damping back (2026-11-13).
+    hint = move_hint(instruction).strip()
+    said = f"{instruction}\n{hint}" if hint else instruction
     # Said last, where the reply is written: "I can't clap right now" answered "Aplaudí"
     # (2026-11-12) with the prompt's "in the language of the instruction" far above it.
     import vlm_common as vc
-    lang = f"\n(Any reply must be in {'English' if vc.asked_in_english(instruction) else 'Spanish'}.)"
+    language = "English" if vc.asked_in_english(instruction) else "Spanish"
+    lang = f"\n(Any reply must be in {language}.)"
+    # The plan too: written in English it lost the idiom — "chocá los cinco" became "clap five
+    # times" and "date vuelta" "the return date" (2026-11-13).
     plan = llm(PLAN_SYSTEM.format(tools=_tools_text()),
-               f"{earlier}Instruction now: {instruction}")
+               f"{earlier}Instruction now: {said}\n(Write understood and the plan in "
+               f"{language}, keeping what the words mean where they are said.)")
     understood = str(plan.get("understood") or instruction)
     steps = [str(s) for s in plan.get("plan") or [] if str(s).strip()]
     emit({"type": "understood", "text": understood})
     if steps:
         emit({"type": "plan", "steps": steps})
-    steps_so_far = [f"Instruction: {instruction}", f"Understood: {understood}",
+    steps_so_far = [f"Instruction: {said}", f"Understood: {understood}",
                     f"Plan: {'; '.join(steps) or '(none)'}"]
     for _ in range(max_steps):
         if stop.is_set():

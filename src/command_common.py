@@ -699,8 +699,16 @@ def _params_line(spec):
     return ", ".join(parts)
 
 
-def build_system_prompt(robot=DEFAULT_ROBOT):
-    """Build the interpreter system prompt from a robot's SKILLS catalog."""
+def _skills_of(robot, skills=None):
+    """The skills a call works over: the robot's catalog, or the `skills` subset a caller offers
+    (the agent's: what safe mode and the robot's link let through), always with "unknown"."""
+    if skills is None:
+        return ROBOTS[_resolve(robot)]["skills"]
+    return {**skills, "unknown": _UNKNOWN_SKILL}
+
+
+def build_system_prompt(robot=DEFAULT_ROBOT, skills=None):
+    """Build the interpreter system prompt from a robot's SKILLS catalog (or `skills`)."""
     r = ROBOTS[_resolve(robot)]
     lines = [
         f"{r['intro']} Convert the user's spoken command into ONE skill call. The "
@@ -723,7 +731,7 @@ def build_system_prompt(robot=DEFAULT_ROBOT):
         "",
         "Skills:",
     ]
-    for name, s in r["skills"].items():
+    for name, s in _skills_of(robot, skills).items():
         if s.get("hidden"):
             continue  # raw mode controls: operator-only, never offered to the model
         lines.append(f"- {name}: {s['desc']} params: {_params_line(s['params'])}")
@@ -758,7 +766,7 @@ def _coerce_number(v, default):
     return default
 
 
-def normalize_intent(parsed, robot=DEFAULT_ROBOT):
+def normalize_intent(parsed, robot=DEFAULT_ROBOT, skills=None):
     """Validate/normalize a parsed model object into a safe intent dict.
 
     Guarantees the returned dict has a known `skill` (for THIS robot) and only the
@@ -766,7 +774,7 @@ def normalize_intent(parsed, robot=DEFAULT_ROBOT):
     on anything missing or invalid. Unknown skills collapse to "unknown". This is
     what keeps a hallucinated field or type from reaching the executor.
     """
-    skills = ROBOTS[_resolve(robot)]["skills"]
+    skills = _skills_of(robot, skills)
     if not isinstance(parsed, dict):
         return {"skill": "unknown", "params": {}, "say": ""}
 
@@ -806,13 +814,14 @@ def normalize_intent(parsed, robot=DEFAULT_ROBOT):
 # The interpreter
 # --------------------------------------------------------------------------- #
 def interpret(text, model, robot=DEFAULT_ROBOT, image_b64=None, url=OLLAMA_HOST,
-              timeout=120, num_ctx=8192, max_tokens=1024):
+              timeout=120, num_ctx=8192, max_tokens=1024, skills=None):
     """Interpret a spoken/typed command into a validated skill intent.
 
     text       : the transcribed command (what /transcribe returned).
     model      : Ollama model tag (e.g. "qwen3-vl:4b"); an instruct model gives the
                  fastest reply since command parsing needs no reasoning.
     robot      : which robot's catalog to use ("g1" | "go2"); unknown -> default.
+    skills     : only these of its skills ({name: spec}); None = the whole catalog.
     image_b64  : optional current camera frame — unused by the SDK-action skills but
                  accepted so future vision skills can share this entry point.
 
@@ -837,7 +846,7 @@ def interpret(text, model, robot=DEFAULT_ROBOT, image_b64=None, url=OLLAMA_HOST,
     payload = {
         "model": model,
         "messages": [
-            {"role": "system", "content": build_system_prompt(rid)},
+            {"role": "system", "content": build_system_prompt(rid, skills)},
             user_msg,
         ],
         "stream": True,
@@ -859,7 +868,7 @@ def interpret(text, model, robot=DEFAULT_ROBOT, image_b64=None, url=OLLAMA_HOST,
     elapsed = time.perf_counter() - t0
 
     parsed, ok = extract_json(content)
-    intent = normalize_intent(parsed if ok else None, rid)
+    intent = normalize_intent(parsed if ok else None, rid, skills)
 
     return {
         "ok": ok,

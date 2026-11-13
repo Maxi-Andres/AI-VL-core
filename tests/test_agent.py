@@ -283,12 +283,100 @@ def test_navigate_to_a_target_right_in_front_does_not_walk():
 
 
 # command — one of the robot's built-in moves, checked like the command interpreter's
-def test_command_offers_the_safe_moves_and_not_walking_or_dangerous_ones():
-    names = ag.command_skills()
-    assert {"wave_hand", "shake_hand", "arm_action", "sit", "stop"} <= set(names)
-    assert not {"walk", "turn", "damp", "zero_torque", "dance", "set_fsm_id", "unknown",
-                "run", "start"} & set(names)                       # the mode is the operator's
+def test_command_offers_every_drive_move_but_safe_mode_ones():
+    """2026-11-13: "todas las opciones del drive, menos las del safe mode". The modes too."""
+    names = set(ag.command_skills())
+    assert {"wave_hand", "shake_hand", "arm_action", "sit", "stop", "stand_up", "squat",
+            "start", "run", "run_waist", "walk_waist", "climb", "lie_up"} <= names
+    assert not {"damp", "zero_torque", "dance", "squat_sdk", "set_fsm_id", "set_speed_mode",
+                "switch_mode"} & names                          # safe mode's and the raw ones
+    assert not {"walk", "turn", "unknown"} & names              # navigate walks, with Nav2
     assert "clap" in ag._tools_text()                            # the arm actions are listed
+
+
+def test_the_moves_are_the_catalog_s_nothing_listed_by_hand(monkeypatch):
+    """A skill added to the catalog reaches the agent with no change here, and one the
+    catalog calls dangerous does not."""
+    import command_common as cc
+    real = cc.catalog
+
+    def catalog(robot):
+        cat = real(robot)
+        skills = {**cat["skills"], "bow": {"label": "Bow", "params": {}},
+                  "backflip": {"label": "Backflip", "params": {}}}
+        return {**cat, "skills": skills, "dangerous": {*cat["dangerous"], "backflip"}}
+    monkeypatch.setattr(cc, "catalog", catalog)
+    assert "bow" in ag.command_skills() and "backflip" not in ag.command_skills()
+    assert 'skill "bow" (Bow)' in ag._skills_text()
+
+
+RELAY = {"transports": {"g1": {
+    "mode": "relay", "allowed_skills": ["stop", "stand_up", "walk_waist", "run_waist", "arm_action",
+                                        "damp", "wave_hand"],
+    "allowed_values": {"arm_action": {"action": ["clap", "hug", "release_arm"]}}}}}
+
+
+def test_the_moves_are_what_the_robot_s_link_delivers(monkeypatch):
+    """The same answer the drive pad strikes its buttons out with: over the relay one walk
+    mode of the waist pair, no sit, no high five."""
+    monkeypatch.setitem(ag._SENDABLE, "value", ag._fetch_sendable(get=lambda: RELAY))
+    moves = ag.command_skills()
+    assert set(moves) == {"stop", "stand_up", "walk_waist", "run_waist", "arm_action", "wave_hand"}
+    action = moves["arm_action"]["params"]["action"]
+    assert action["values"] == ["release_arm", "hug", "clap"] or set(action["values"]) == {
+        "clap", "hug", "release_arm"}
+    assert "high_five" not in ag._skills_text() and "sit" not in ag._skills_text()
+    assert all(set(vs) <= {"clap", "hug", "release_arm"} for vs in action["groups"].values())
+
+
+def test_what_the_link_delivers_is_read_from_the_executor_and_kept_a_while(monkeypatch):
+    assert ag._fetch_sendable(get=lambda: RELAY)["skills"] >= {"stop", "walk_waist"}
+    dds = {"transports": {"g1": {"mode": "dds"}}}
+    assert ag._fetch_sendable(get=lambda: dds) is None            # DDS: everything gets through
+
+    def down():
+        raise ConnectionError("executor down")
+    assert ag._fetch_sendable(get=down) is None                   # the executor refuses, then
+    asked = []
+    monkeypatch.setattr(ag, "_fetch_sendable", lambda: asked.append(1) or {"skills": set(),
+                                                                           "values": {}})
+    monkeypatch.setitem(ag._SENDABLE, "at", None)
+    ag.sendable(now=100.0)
+    ag.sendable(now=100.0 + ag.SENDABLE_TTL_S - 1)
+    assert len(asked) == 1
+    ag.sendable(now=100.0 + ag.SENDABLE_TTL_S + 1)
+    assert len(asked) == 2
+
+
+def test_the_model_reads_each_value_s_label_and_the_mode_it_needs():
+    """"Chocá los cinco" (2026-11-12): the name clap alone hid that it is the app's high five.
+    The labels and the groups are the catalog's, nothing written here."""
+    text = ag._skills_text()
+    assert "clap (High five clap)" in text
+    assert "hug (Hug)" not in text and "x_ray (X-ray)" not in text   # a label that adds nothing
+    assert "needing Run mode: hug|clap" in text
+    assert "(true = offer the hand (start), false = end the handshake)" in text
+
+
+def test_a_value_that_cannot_be_sent_is_explained_never_swapped_for_the_default():
+    """The interpreter puts the default in place of a bad value: arm_action "chocar" would
+    have released the arms."""
+    out = ag.tool_command({"skill": "arm_action", "params": {"action": "chocar"}}, lambda e: None,
+                          threading.Event(), call=lambda body: pytest.fail("sent"))
+    assert not out["ok"] and "'chocar' is not a value" in out["error"] and "clap" in out["error"]
+
+
+def test_a_safe_mode_move_is_refused_with_why(monkeypatch):
+    out = ag.tool_command({"skill": "damp"}, lambda e: None, threading.Event(),
+                          call=lambda body: pytest.fail("sent"))
+    assert not out["ok"] and "safe mode" in out["error"]
+    monkeypatch.setitem(ag._SENDABLE, "value", ag._fetch_sendable(get=lambda: RELAY))
+    out = ag.tool_command({"skill": "high_five"}, lambda e: None, threading.Event(),
+                          call=lambda body: pytest.fail("sent"), interpret=fake_interpreter({}))
+    assert not out["ok"] and "cannot be done now" in out["error"]
+    out = ag.tool_command({"skill": "arm_action", "params": {"action": "high_five"}},
+                          lambda e: None, threading.Event(), call=lambda body: pytest.fail("sent"))
+    assert not out["ok"] and "can be sent now" in out["error"]
 
 
 def test_command_sends_a_checked_skill_with_safe_mode():
@@ -300,23 +388,82 @@ def test_command_sends_a_checked_skill_with_safe_mode():
     events, emit = collect()
     out = ag.tool_command({"skill": "arm_action", "params": {"action": "clap", "bogus": 1}},
                           emit, threading.Event(), call=call)
-    assert out == {"ok": True, "skill": "arm_action"}
+    assert out == {"ok": True, "skill": "arm_action", "action": "clap"}   # what it did
     assert sent == [{"skill": "arm_action", "params": {"action": "clap"}}]
     assert events[0]["step"] == "arm_action"
 
 
-@pytest.mark.parametrize("skill", ["damp", "walk", "volar", ""])
-def test_command_refuses_what_it_does_not_offer_without_calling_the_robot(skill):
+@pytest.mark.parametrize("skill, why", [("damp", "safe mode"), ("zero_torque", "safe mode"),
+                                        ("dance", "safe mode"), ("walk", "navigate"),
+                                        ("turn", "navigate"), ("", "which move")])
+def test_command_refuses_what_it_does_not_offer_without_calling_the_robot(skill, why):
+    """A move of the catalog it may not do is refused with why, and never asked about."""
     sent = []
     out = ag.tool_command({"skill": skill}, collect()[1], threading.Event(),
-                          call=lambda b: sent.append(b) or {"ok": True})
-    assert out["ok"] is False and "no move" in out["error"] and not sent
+                          call=lambda b: sent.append(b) or {"ok": True},
+                          interpret=lambda w, m: pytest.fail("asked the interpreter"))
+    assert out["ok"] is False and why in out["error"] and not sent
+
+
+def fake_interpreter(answers):
+    """The command interpreter, by the words it gets; records the moves it was offered."""
+    seen = []
+
+    def interpret(words, moves):
+        seen.append((words, set(moves)))
+        return answers.get(words, {"skill": "unknown", "params": {}})
+    interpret.seen = seen
+    return interpret
+
+
+def test_a_move_in_words_is_the_interpreter_s_to_understand():
+    """"Bajá los brazos" was a squat and "chocá los cinco" a look when the agent picked the
+    move alone (2026-11-13): the words go to the drive's own interpreter, over the moves that
+    can be done now only, and what it picked is what is sent."""
+    sent = []
+    interpret = fake_interpreter({"bajá los brazos": {"skill": "arm_action",
+                                                     "params": {"action": "release_arm"}}})
+    events, emit = collect()
+    out = ag.tool_command({"move": "bajá los brazos"}, emit, threading.Event(),
+                          call=lambda b: sent.append(b) or {"ok": True}, interpret=interpret)
+    assert out == {"ok": True, "skill": "arm_action", "action": "release_arm"}
+    assert sent == [{"skill": "arm_action", "params": {"action": "release_arm"}}]
+    assert [e["step"] for e in events] == ["understanding", "arm_action"]
+    offered = interpret.seen[0][1]
+    assert "damp" not in offered and "walk" not in offered and "clap" not in offered
+    assert offered == set(ag.command_skills())
+
+
+def test_a_move_the_interpreter_does_not_find_is_said_with_the_moves_there_are():
+    out = ag.tool_command({"move": "volá"}, lambda e: None, threading.Event(),
+                          call=lambda body: pytest.fail("sent"), interpret=fake_interpreter({}))
+    assert not out["ok"] and "none of the moves that can be done now" in out["error"]
+    assert "arm_action" in out["error"]
+
+
+def test_a_bad_value_from_the_interpreter_is_explained_not_swapped():
+    """"Mandame un beso" -> arm_action "kiss": the interpreter would send release_arm."""
+    interpret = fake_interpreter({"mandame un beso": {"skill": "arm_action",
+                                                     "params": {"action": "kiss"}}})
+    out = ag.tool_command({"move": "mandame un beso"}, lambda e: None, threading.Event(),
+                          call=lambda body: pytest.fail("sent"), interpret=interpret)
+    assert not out["ok"] and "'kiss' is not a value" in out["error"]
+    assert "left_kiss" in out["error"] and "two_hand_kiss" in out["error"]
+
+
+def test_the_interpreter_down_is_said_never_guessed():
+    def down(words, moves):
+        raise ConnectionError("llama-server down")
+    out = ag.tool_command({"move": "aplaudí"}, lambda e: None, threading.Event(),
+                          call=lambda body: pytest.fail("sent"), interpret=down)
+    assert not out["ok"] and "could not understand the move" in out["error"]
 
 
 def test_command_failures_reach_the_model():
     out = ag.tool_command({"skill": "wave_hand"}, collect()[1], threading.Event(),
                           call=lambda b: {"ok": False, "error": "the robot is not standing"})
-    assert out == {"ok": False, "skill": "wave_hand", "error": "the robot is not standing"}
+    assert out == {"ok": False, "skill": "wave_hand", "turn": False,
+                   "error": "the robot is not standing"}
 
 
 # --------------------------------------------------------------------------- #
@@ -339,7 +486,7 @@ def test_the_conversation_so_far_goes_with_every_call_to_the_model(earlier, now)
         assert earlier["question"] in told and earlier["answer"] in told
         assert earlier["done"][0] in told
         assert "do NOT do any of it again" in told
-    assert llm.seen[0].endswith(f"Instruction now: {now}")
+    assert f"Instruction now: {now}\n(Write understood and the plan in " in llm.seen[0]
 
 
 def test_without_a_conversation_no_earlier_turns_are_told():
@@ -347,7 +494,7 @@ def test_without_a_conversation_no_earlier_turns_are_told():
     llm = scripted({"understood": "hi", "plan": []}, {"reply": "hola"})
     ag.run("hola", emit, llm=llm, tools={}, history=[])
     assert "Earlier in this conversation" not in llm.seen[0]
-    assert llm.seen[0].endswith("Instruction now: hola")
+    assert "Instruction now: hola\n(Write understood and the plan in Spanish" in llm.seen[0]
     assert "Instruction: hola" in llm.seen[1]
 
 
@@ -386,15 +533,18 @@ def test_every_step_is_told_the_language_to_reply_in(instruction, lang):
     assert llm.seen[1].endswith(f"(Any reply must be in {lang}.)")
 
 
-def test_a_move_named_by_its_parameter_is_explained_not_guessed():
+def test_a_move_named_by_its_parameter_goes_to_the_interpreter():
     """Seen on the robot: skill "clap" was refused with only the list of moves, and the model
-    gave up. Nothing is mapped by hand: the error says where "clap" is, the model calls it."""
+    gave up. A name that is no move is words for the interpreter, which knows clap is an arm
+    action; when it finds nothing, the error says where the value lives."""
+    sent = []
+    interpret = fake_interpreter({"clap": {"skill": "arm_action", "params": {"action": "clap"}}})
     out = ag.tool_command({"skill": "clap"}, lambda e: None, threading.Event(),
-                          call=lambda body: pytest.fail("sent"))
-    assert not out["ok"]
-    assert '{"skill": "arm_action", "params": {"action": "clap"}}' in out["error"]
-    assert "no move 'fly'" in ag.tool_command({"skill": "fly"}, lambda e: None, threading.Event(),
-                                              call=lambda body: pytest.fail("sent"))["error"]
+                          call=lambda b: sent.append(b) or {"ok": True}, interpret=interpret)
+    assert out["ok"] and sent == [{"skill": "arm_action", "params": {"action": "clap"}}]
+    out = ag.tool_command({"skill": "hug"}, lambda e: None, threading.Event(),
+                          call=lambda body: pytest.fail("sent"), interpret=fake_interpreter({}))
+    assert not out["ok"] and "'arm_action hug'" in out["error"]
 
 
 def test_moves_are_offered_as_calls():
@@ -438,3 +588,59 @@ def test_remember_hands_the_note_and_picture_to_the_gateway():
 def test_the_model_is_offered_search_and_remember():
     text = ag._tools_text()
     assert "- search(" in text and "- remember(" in text
+
+
+# --------------------------------------------------------------------------- #
+# The drive's command interpreter reads the instruction first (2026-11-13: 29 -> 45 of 48)
+# --------------------------------------------------------------------------- #
+def reads(answer):
+    return lambda words, moves: answer
+
+
+@pytest.mark.parametrize("answer, says", [
+    ({"skill": "arm_action", "params": {"action": "release_arm"}},
+     "the move 'arm_action release_arm'"),
+    ({"skill": "arm_action", "params": {"action": "clap"}}, "clap (High five clap)"),
+    ({"skill": "lie_up", "params": {}}, "the move 'lie_up'"),
+    ({"skill": "damp", "params": {}}, "Damping: safe mode holds it back, so say you cannot"),
+    ({"skill": "dance", "params": {"name": "Spin_discs"}}, "Dance: safe mode holds it back"),
+    ({"skill": "walk", "params": {}}, "walking somewhere is the navigate tool's"),
+    ({"skill": "turn", "params": {}}, "turning in place is the navigate tool's"),
+])
+def test_the_interpreter_s_reading_is_told_to_the_agent(answer, says):
+    assert says in ag.move_hint("x", interpret=reads(answer))
+
+
+def test_no_reading_no_hint():
+    assert ag.move_hint("¿qué ves?", interpret=reads({"skill": "unknown", "params": {}})) == ""
+    assert ag.move_hint("x", interpret=reads({})) == ""
+    assert ag.move_hint("x", interpret=reads({"skill": "arm_action",
+                                               "params": {"action": "kiss"}})) == ""
+
+    def down(words, moves):
+        raise ConnectionError("llama-server down")
+    assert ag.move_hint("aplaudí", interpret=down) == ""          # a hint, never a failure
+
+
+def test_a_reading_the_link_cannot_send_is_said(monkeypatch):
+    monkeypatch.setitem(ag._SENDABLE, "value", ag._fetch_sendable(get=lambda: RELAY))
+    hint = ag.move_hint("x", interpret=reads({"skill": "arm_action",
+                                              "params": {"action": "high_five"}}))
+    assert "high_five: the robot's link cannot send it" in hint
+    assert "link cannot send it" in ag.move_hint("x", interpret=reads({"skill": "sit"}))
+
+
+def test_the_hint_is_asked_over_the_whole_catalog():
+    """Safe mode's moves included: that is how the agent learns "relajate" is held back."""
+    seen = []
+    ag.move_hint("relajate", interpret=lambda w, m: seen.append(set(m)) or {})
+    assert {"damp", "dance", "walk", "arm_action"} <= seen[0]
+    assert not {"set_fsm_id", "unknown"} & seen[0]
+
+
+def test_the_hint_goes_right_under_the_instruction(monkeypatch):
+    monkeypatch.setattr(ag, "move_hint", lambda instruction: "READS: the move 'lie_up'.\n\n")
+    llm = scripted({"understood": "u", "plan": []}, {"reply": "Listo."})
+    ag.run("levantate del piso", lambda e: None, threading.Event(), llm=llm, tools={})
+    assert "Instruction now: levantate del piso\nREADS: the move 'lie_up'.\n(Write" in llm.seen[0]
+    assert "Instruction: levantate del piso\nREADS: the move 'lie_up'." in llm.seen[1]
