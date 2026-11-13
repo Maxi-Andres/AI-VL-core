@@ -21,14 +21,25 @@ def test_every_arm_action_sits_in_exactly_one_group():
     under no heading, with no hint of the mode it needs — or listed under two modes."""
     grouped = _grouped()
     assert len(grouped) == len(set(grouped))
-    assert set(grouped) == set(cc.ARM_ACTION_IDS)
+    assert set(grouped) == {*cc.ARM_ACTION_IDS, *cc.APP_ARM_ACTIONS}
 
 
 def test_the_app_actions_are_grouped_under_run():
     """Measured 2026-10-01: from Walk the robot accepts these and does nothing."""
     run = set(cc.ARM_ACTION_GROUPS["Run mode"])
-    assert {"hug", "clap", "face_wave", "left_kiss", "heart", "hands_up", "x_ray",
+    assert {"hug", "high_five_clap", "face_wave", "left_kiss", "heart", "hands_up", "x_ray",
             "right_hand_up", "reject", "shake_hand"} <= run
+
+
+def test_clap_is_the_clap_and_the_app_s_high_five_clap_is_its_own():
+    """2026-11-13: "clap" made the robot do the app's "High five clap" (565), from the pad and
+    the agent. The clap is the arm service's 17; 565 is a value of its own, played from Run."""
+    action = cc.catalog("g1")["skills"]["arm_action"]["params"]["action"]
+    assert "clap" in action["values"] and "high_five_clap" in action["values"]
+    assert action["labels"]["clap"] == "Clap"
+    assert action["labels"]["high_five_clap"] == "High five clap"
+    assert "clap" in cc.ARM_ACTION_GROUPS["Walk or Run"]
+    assert cc.ARM_ACTION_IDS["clap"] == 17 and "high_five_clap" not in cc.ARM_ACTION_IDS
 
 
 def test_the_catalog_hands_the_groups_to_the_ui():

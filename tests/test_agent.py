@@ -349,12 +349,13 @@ def test_what_the_link_delivers_is_read_from_the_executor_and_kept_a_while(monke
 
 
 def test_the_model_reads_each_value_s_label_and_the_mode_it_needs():
-    """"Chocá los cinco" (2026-11-12): the name clap alone hid that it is the app's high five.
+    """A label that says more than the name goes with it; the groups say the mode each needs.
     The labels and the groups are the catalog's, nothing written here."""
     text = ag._skills_text()
-    assert "clap (High five clap)" in text
+    assert "heart (Arm heart)" in text
     assert "hug (Hug)" not in text and "x_ray (X-ray)" not in text   # a label that adds nothing
-    assert "needing Run mode: hug|clap" in text
+    assert "needing Run mode: hug|high_five_clap|" in text
+    assert "needing Walk or Run: release_arm|clap|" in text
     assert "(true = offer the hand (start), false = end the handshake)" in text
 
 
@@ -600,7 +601,9 @@ def reads(answer):
 @pytest.mark.parametrize("answer, says", [
     ({"skill": "arm_action", "params": {"action": "release_arm"}},
      "the move 'arm_action release_arm'"),
-    ({"skill": "arm_action", "params": {"action": "clap"}}, "clap (High five clap)"),
+    ({"skill": "arm_action", "params": {"action": "high_five_clap"}},
+     "the move 'arm_action high_five_clap'"),
+    ({"skill": "arm_action", "params": {"action": "heart"}}, "heart (Arm heart)"),
     ({"skill": "lie_up", "params": {}}, "the move 'lie_up'"),
     ({"skill": "damp", "params": {}}, "Damping: safe mode holds it back, so say you cannot"),
     ({"skill": "dance", "params": {"name": "Spin_discs"}}, "Dance: safe mode holds it back"),
@@ -644,3 +647,87 @@ def test_the_hint_goes_right_under_the_instruction(monkeypatch):
     ag.run("levantate del piso", lambda e: None, threading.Event(), llm=llm, tools={})
     assert "Instruction now: levantate del piso\nREADS: the move 'lie_up'.\n(Write" in llm.seen[0]
     assert "Instruction: levantate del piso\nREADS: the move 'lie_up'." in llm.seen[1]
+
+
+# --------------------------------------------------------------------------- #
+# Which way, in words (2026-11-13: left came out as negative numbers, three times out of three)
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("args, sent", [
+    ({"turn": "left", "degrees": 90}, (0.0, 0.0, round(math.pi / 2, 4))),
+    ({"turn": "right"}, (0.0, 0.0, -round(math.pi / 2, 4))),          # a quarter turn
+    ({"go": "back"}, (-1.0, 0.0, 0.0)),                                # a metre
+    ({"metres": 0.5}, (0.5, 0.0, 0.0)),                                # forward
+    ({"turn": "right", "degrees": 45}, (0.0, 0.0, -round(math.pi / 4, 4))),
+    ({"go": "left", "metres": 1}, (0.0, 1.0, 0.0)),
+    ({"go": "right", "metres": 0.5}, (0.0, -0.5, 0.0)),
+    ({"go": "back", "metres": 1}, (-1.0, 0.0, 0.0)),
+    ({"go": "forward", "metres": 2, "turn": "right", "degrees": 90},
+     (2.0, 0.0, -round(math.pi / 2, 4))),
+    ({"go": "left", "metres": -1}, (0.0, 1.0, 0.0)),               # the word decides, not a sign
+    ({"turn": "left", "degrees": -90}, (0.0, 0.0, round(math.pi / 2, 4))),
+    ({"forward_m": 1, "turn_deg": -30}, (1.0, 0.0, -round(math.pi / 6, 4))),   # the old way
+])
+def test_the_way_is_a_word_and_the_sign_is_the_code_s(args, sent):
+    call = fake_walk_executor([{"state": "success", "error": {"pos_m": 0.0, "yaw_deg": 0.0}}])
+    assert ag.tool_navigate(args, collect()[1], threading.Event(), call=call, poll_s=0)["ok"]
+    body = call.sent[0]
+    assert (body["dx"], body["dy"], body["dyaw"]) == sent
+
+
+@pytest.mark.parametrize("args", [{"turn": "around"}, {"turn": "around", "degrees": 180},
+                                  {"turn": "left", "degrees": 180},
+                                  {"turn": "right", "degrees": 200}])
+def test_half_a_turn_is_never_rounded_past_what_the_relay_takes(args):
+    """"Date media vuelta": 180 deg rounded to 3.1416 rad, over pi, and the relay refused it."""
+    call = fake_walk_executor([{"state": "success", "error": {"pos_m": 0.0, "yaw_deg": 0.0}}])
+    ag.tool_navigate(args, collect()[1], threading.Event(), call=call, poll_s=0)
+    assert 3.14 < abs(call.sent[0]["dyaw"]) <= math.pi
+
+
+@pytest.mark.parametrize("args, why", [
+    ({"go": "izquierda", "metres": 1}, "go must be one of"),
+    ({"turn": "up", "degrees": 90}, "turn must be one of"),
+    ({}, "nowhere to go"),
+    ({"target": "adelante", "metres": 0.5}, "not both"),
+])
+def test_a_way_it_cannot_take_is_said_without_moving(args, why):
+    call = fake_walk_executor([])
+    out = ag.tool_navigate(args, collect()[1], threading.Event(), call=call, poll_s=0)
+    assert not out["ok"] and why in out["error"] and not call.sent
+
+
+def test_a_failed_walk_says_how_far_it_really_went_and_turned():
+    """The 45 deg turn failed 9 deg off and the agent turned 45 again: the result now says it
+    did turn 36."""
+    start = {"x": 0.0, "y": 0.0, "yaw": 0.0}
+    pose = {"x": 0.2, "y": 0.0, "yaw": -math.radians(36)}
+    call = fake_walk_executor([{"state": "failure", "start": start, "pose": pose,
+                                "error": {"pos_m": 0.2, "yaw_deg": 9.0},
+                                "reason": "not there after 43 s"}])
+    out = ag.tool_navigate({"turn": "right", "degrees": 45}, collect()[1], threading.Event(),
+                           call=call, poll_s=0)
+    assert not out["ok"] and out["turned"] == "36 deg right" and out["went_m"] == 0.2
+    assert "never do it again whole" in ag._tools_text()
+
+
+def test_a_reading_the_link_cannot_send_is_read_again_among_what_it_can(monkeypatch):
+    """"Chocá los cinco" read as the high five, which the relay leaves out; among what it sends,
+    it is the app's high five clap."""
+    monkeypatch.setitem(ag._SENDABLE, "value", {
+        "skills": {"arm_action", "stop"},
+        "values": {"arm_action": {"action": ["clap", "high_five_clap", "hug"]}}})
+    asked = []
+
+    def interpret(words, moves):
+        asked.append(set(moves["arm_action"]["params"]["action"]["values"]))
+        return {"skill": "arm_action",
+                "params": {"action": "high_five" if len(asked) == 1 else "high_five_clap"}}
+    hint = ag.move_hint("chocá los cinco", interpret=interpret)
+    assert "the move 'arm_action high_five_clap'" in hint
+    assert "high_five" in asked[0] and "high_five" not in asked[1]
+
+
+def test_safe_mode_s_moves_are_never_read_again():
+    asked = []
+    hint = ag.move_hint("relajate", interpret=lambda w, m: asked.append(1) or {"skill": "damp"})
+    assert "safe mode holds it back" in hint and len(asked) == 1

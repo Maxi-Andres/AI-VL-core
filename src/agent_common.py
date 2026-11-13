@@ -61,14 +61,18 @@ TOOLS = {
         "args": {"target": "a thing it can see now, in words ('the chair', 'that person'): it "
                            "walks up to it and stops in front, facing it. Leave it out to go "
                            "by metres instead",
-                 "forward_m": "metres forward (negative = back), at most 10",
-                 "left_m": "metres to its left (negative = right), usually 0",
-                 "turn_deg": "degrees to turn, at most 180: LEFT is positive, RIGHT is negative "
-                             "('turn right' = -90, 'turn left' = 90, 'turn around' = 180)"},
+                 "go": "forward, back, left or right: which way to walk (left out with metres: "
+                       "forward; left out alone: no walking, only the turn)",
+                 "metres": "how far to walk, at most 10 (left out: 1)",
+                 "turn": "left, right or around: which way to turn in place (after walking)",
+                 "degrees": "how much to turn, at most 180 (left out: 90, a quarter turn; "
+                            "'around' is 180)"},
         "does": "Walks the robot by itself, going round obstacles and people, up to 10 m. MOVES "
-                "THE ROBOT. Give a target it can see, or forward_m/left_m (and turn_deg to face "
-                "another way at the end); only turn_deg turns it in place. If the target is not "
-                "in sight, turn and look first.",
+                "THE ROBOT. Give a target it can see, or go and metres, and/or turn and "
+                "degrees; e.g. 'girá a la izquierda' is {\"turn\": \"left\", \"degrees\": 90}. If "
+                "the target is not in sight, turn and look first. The result says how far it "
+                "really went and turned: a walk that failed may have moved part of the way, so "
+                "never do it again whole.",
     },
     "command": {
         "args": {"move": "the move as the person said it, in their own words, copied (e.g. "
@@ -492,6 +496,11 @@ def locate_seen(phrase):
 def tool_navigate(args, emit, stop, call=None, poll_s=WALK_POLL_S, locate=None):
     """Walk to a target seen in words, or by metres and degrees, to the walk's end."""
     target = str(args.get("target") or "").strip()
+    if target and any(args.get(k) for k in ("go", "metres", "turn", "degrees")):
+        # {"target": "adelante", "metres": 0.5} (2026-11-13): a way, not a thing to walk up to.
+        return {"ok": False, "error": "give either a target (a thing in sight) or the way: go "
+                                      "(forward, back, left, right) and metres, and/or turn and "
+                                      "degrees — not both"}
     if target:
         locate = locate or locate_seen
         emit({"type": "tool_event", "tool": "navigate", "step": "looking",
@@ -509,14 +518,70 @@ def tool_navigate(args, emit, stop, call=None, poll_s=WALK_POLL_S, locate=None):
         if fwd == left == 0.0 and abs(turn) < NAV_FACING_DEG:
             return {"ok": True, "state": "already there", "distance_m": round(math.hypot(*where), 2)}
     else:
-        try:
-            fwd, left, turn = (float(args.get(k) or 0)
-                               for k in ("forward_m", "left_m", "turn_deg"))
-        except (TypeError, ValueError):
-            return {"ok": False, "error": "forward_m, left_m and turn_deg must be numbers"}
+        got = walk_from_words(args)
+        if isinstance(got, str):
+            return {"ok": False, "error": got}
+        fwd, left, turn = got
         if not (fwd or left or turn):
-            return {"ok": False, "error": "nowhere to go: give a target, or metres or degrees"}
+            return {"ok": False, "error": "nowhere to go: give a target, or go and metres, or "
+                                          "turn and degrees"}
     return _walk("navigate", fwd, left, turn, emit, stop, call, poll_s)
+
+
+# Which way each word goes, as signs: the model said left with a negative number and right with
+# a positive one, three times in one session (2026-11-13); it now names the way and this signs it.
+WALK_WAYS = {"forward": (1, 0), "back": (-1, 0), "left": (0, 1), "right": (0, -1)}
+TURN_WAYS = {"left": 1, "right": -1, "around": 1}
+
+
+def walk_from_words(args):
+    """(forward_m, left_m, turn_deg) from navigate's words ({"go", "metres", "turn",
+    "degrees"}), or the reason it cannot. The old signed numbers (forward_m, left_m, turn_deg)
+    still work; the words win when both are there."""
+    try:
+        fwd, left, turn = (float(args.get(k) or 0) for k in ("forward_m", "left_m", "turn_deg"))
+        metres = abs(float(args.get("metres") or 0))
+        degrees = abs(float(args.get("degrees") or 0))
+    except (TypeError, ValueError):
+        return "metres and degrees must be numbers"
+    # Left out, as the tool tells the model: 1 m, and forward. Asked for them, it answered the
+    # person "¿Cuántos metros?" or "Voy a retroceder 1 metro" and did not move (2026-11-13).
+    go = str(args.get("go") or "").strip().lower() or ("forward" if metres else "")
+    if go:
+        if go not in WALK_WAYS:
+            return f"go must be one of {', '.join(WALK_WAYS)}"
+        metres = metres or 1.0
+        fwd, left = (metres * k for k in WALK_WAYS[go])
+    way = str(args.get("turn") or "").strip().lower()
+    if way:
+        if way not in TURN_WAYS:
+            return f"turn must be one of {', '.join(TURN_WAYS)}"
+        # Left out: a quarter turn, half for "around" — as the tool tells the model. Asked for
+        # them, it answered the person "Giremos 90 grados" and did nothing (2026-11-13).
+        degrees = degrees or (180.0 if way == "around" else 90.0)
+        turn = TURN_WAYS[way] * degrees
+    return fwd, left, turn
+
+
+def _yaw_rad(turn_deg):
+    """Degrees -> radians the relay takes: at most half a turn, never rounded past it (180 deg
+    rounded to 3.1416 was refused as "at most half a turn", 2026-11-13)."""
+    rad = round(abs(math.radians(turn_deg)), 4)
+    if rad > math.pi:
+        rad = math.floor(math.pi * 1e4) / 1e4
+    return math.copysign(rad, turn_deg)
+
+
+def _went(w):
+    """How far a walk really went and turned, from where it started: {"went_m", "turned"}."""
+    a, b = w.get("start") or {}, w.get("pose") or {}
+    try:
+        went = math.hypot(b["x"] - a["x"], b["y"] - a["y"])
+        turned = math.degrees(math.atan2(math.sin(b["yaw"] - a["yaw"]), math.cos(b["yaw"] - a["yaw"])))
+    except (KeyError, TypeError):
+        return {}
+    way = "left" if turned >= 0 else "right"
+    return {"went_m": round(went, 2), "turned": f"{abs(turned):.0f} deg {way}"}
 
 
 def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
@@ -524,8 +589,7 @@ def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
     STOP button) cancels it on the robot. The limits are the relay's: a refusal comes back as
     the tool's error, for the model to read."""
     call = call or _executor_walk
-    out = call({"op": "goto", "dx": round(fwd, 3), "dy": round(left, 3),
-                "dyaw": round(math.radians(turn), 4)})
+    out = call({"op": "goto", "dx": round(fwd, 3), "dy": round(left, 3), "dyaw": _yaw_rad(turn)})
     if not out.get("ok"):
         return {"ok": False, "error": out.get("error") or "the robot refused the walk"}
     phase, blocked = None, False
@@ -548,7 +612,7 @@ def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
             emit({"type": "tool_event", "tool": tool, "step": w.get("state") or "unknown",
                   "detail": w.get("reason") or (f"{err.get('pos_m', 0) * 100:.0f} cm and "
                                                 f"{abs(err.get('yaw_deg', 0)):.0f} deg off")})
-            return {"ok": w.get("state") == "success", "state": w.get("state"),
+            return {"ok": w.get("state") == "success", "state": w.get("state"), **_went(w),
                     "off_cm": round(err.get("pos_m", 0) * 100) if err else None,
                     "off_deg": abs(err.get("yaw_deg", 0)) if err else None,
                     **({"reason": w["reason"]} if w.get("reason") else {})}
@@ -695,7 +759,7 @@ def tool_command(args, emit, stop, call=None, interpret=None):
             **({"error": out["error"]} if out.get("error") else {})}
 
 
-def move_hint(instruction, interpret=None):
+def move_hint(instruction, interpret=None, _again=True):
     """What the drive's command interpreter reads in `instruction`, over the whole catalog, as a
     line for the agent ("" when it reads no move, or is not there to ask). The agent alone took
     "bajá los brazos" for a squat and "levantá la mano derecha" for a wave, and said it could not
@@ -717,14 +781,24 @@ def move_hint(instruction, interpret=None):
     if skill in COMMAND_LEFT_OUT:
         return f"{lead}: {COMMAND_LEFT_OUT[skill]}.\n\n"
     moves = command_skills()
-    if skill not in moves:
-        why = "safe mode holds it back" if skill in cat["dangerous"] else "the robot's link cannot send it"
-        return f"{lead}: {why}, so say you cannot do it now.\n\n"
+    if skill in cat["dangerous"]:
+        return f"{lead}: safe mode holds it back, so say you cannot do it now.\n\n"
     choice = next((pn for pn, p in every[skill]["params"].items() if "values" in p), None)
     value = params.get(choice) if choice else None
-    if choice and value not in moves[skill]["params"][choice]["values"]:
-        if value in every[skill]["params"][choice]["values"]:
-            return f"{lead} {value}: the robot's link cannot send it, so say you cannot do it now.\n\n"
+    if skill not in moves or (choice and value not in moves[skill]["params"][choice]["values"]):
+        # What the link cannot send: read again among what it can. "Chocá los cinco" read as
+        # the high five, which the relay leaves out, while the app's high five clap goes
+        # (2026-11-13).
+        if _again and (skill not in moves or value in every[skill]["params"][choice]["values"]):
+            first = f"{skill} {value}" if value else skill
+            again = move_hint(instruction, interpret=lambda w, m: (interpret or _interpret)(
+                f"{w}\n(\"{first}\" cannot be sent now: answer with the one closest to it that "
+                f"can.)", command_skills()), _again=False)
+            if again:
+                return again
+        if skill not in moves or value in every[skill]["params"][choice]["values"]:
+            return (f"{lead}{' ' + value if value else ''}: the robot's link cannot send it, so "
+                    "say you cannot do it now.\n\n")
         return ""
     if value:
         label = _value_text(value, every[skill]["params"][choice].get("labels"))

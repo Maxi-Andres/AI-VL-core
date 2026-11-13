@@ -108,6 +108,12 @@ ARM_ACTION_IDS = {
     "forward_push": 36,   # forward_push                 (mode_machine 5/6 only)
 }
 
+# The app's own arm actions with no arm-service id: the app plays them by an FSM code (the
+# executor's g1_commands.APP_ARM_ACTIONS and the relay's action_* verbs hold the codes). Its
+# "High five clap" (565) is NOT the clap above (17, the robot's "clamp"): "clap" sent it over the
+# relay, from the pad and the agent, until 2026-11-13.
+APP_ARM_ACTIONS = ["high_five_clap"]
+
 # ALL [robot] — named "teach" actions the robot stores separately from the id-indexed
 # ones above. They run through a DIFFERENT api (ExecuteAction by NAME, arm api 7108) and
 # each has a duration. Same GetActionList answer — this is the app's "dance".
@@ -127,7 +133,8 @@ ARM_ACTION_LABELS = {
     "left_kiss": "Left kiss",
     "right_kiss": "Right kiss",
     "hands_up": "Hands up",
-    "clap": "High five clap",   # the app's name for it (2026-10-01)
+    "clap": "Clap",
+    "high_five_clap": "High five clap",   # the app's name for its 565 (2026-10-01)
     "high_five": "High five",
     "hug": "Hug",
     "heart": "Arm heart",
@@ -152,9 +159,9 @@ ARM_ACTION_LABELS = {
 # Walk the robot accepts them and does nothing; the arm service's ids (api 7106) played fine
 # from Walk. turn_back_wave is the robot's own restriction (it published fsm 500/501 for it).
 ARM_ACTION_GROUPS = {
-    "Run mode": ["hug", "clap", "face_wave", "left_kiss", "heart", "hands_up", "x_ray",
+    "Run mode": ["hug", "high_five_clap", "face_wave", "left_kiss", "heart", "hands_up", "x_ray",
                  "right_hand_up", "reject", "shake_hand", "high_five"],
-    "Walk or Run": ["release_arm", "two_hand_kiss", "right_kiss", "right_heart", "high_wave",
+    "Walk or Run": ["release_arm", "clap", "two_hand_kiss", "right_kiss", "right_heart", "high_wave",
                     "box_win_left", "box_win_right", "box_win_both", "hand_on_heart",
                     "hands_up_right", "forward_push"],
     "Walk mode": ["turn_back_wave"],
@@ -405,7 +412,7 @@ G1_SKILLS = {
                 "a locomotion mode — Run for the app's own actions, Walk or Run for the "
                 "rest (see the groups; measured 2026-10-01).",
         "params": {
-            "action": {"values": list(ARM_ACTION_IDS.keys()),
+            "action": {"values": [*ARM_ACTION_IDS, *APP_ARM_ACTIONS],
                        "labels": ARM_ACTION_LABELS, "groups": ARM_ACTION_GROUPS,
                        "default": "release_arm"},
         },
@@ -413,7 +420,9 @@ G1_SKILLS = {
                      "make a heart", "blow a kiss", "cross your arms to say no",
                      "put your arms down"],
         "notes": "Map 'put/lower your arms down', 'rest your arms' or 'let go' to "
-                 "action=release_arm (the arms-at-rest pose).",
+                 "action=release_arm (the arms-at-rest pose). clap is clapping the hands; "
+                 "high_five_clap is the app's 'High five clap', a high five to the person "
+                 "(give me five).",
     },
     "dance": {
         "label": "Dance",
