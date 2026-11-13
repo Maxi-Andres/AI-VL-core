@@ -497,7 +497,7 @@ def test_without_a_conversation_no_earlier_turns_are_told():
     ag.run("hola", emit, llm=llm, tools={}, history=[])
     assert "Earlier in this conversation" not in llm.seen[0]
     assert "Instruction now (not done yet): hola\n(Write understood and the plan in Spanish" in llm.seen[0]
-    assert "Instruction (now, not done yet): hola" in llm.seen[1]
+    assert "Instruction: hola" in llm.seen[1]
 
 
 def test_only_the_newest_turns_that_fit_go_and_empty_ones_are_skipped():
@@ -532,7 +532,11 @@ def test_every_step_is_told_the_language_to_reply_in(instruction, lang):
     _events, emit = collect()
     llm = scripted({"understood": "x", "plan": []}, {"reply": "ok"})
     ag.run(instruction, emit, llm=llm, tools={})
-    assert llm.seen[1].endswith(f"(Any reply must be in {lang}.)")
+    assert f"\n(Any reply must be in {lang}." in llm.seen[1]
+    assert llm.seen[1].endswith(")")                     # said last, where the reply is written
+    # Spanish is read as Spanish: "date la vuelta" was the English "date" (2026-11-13).
+    assert ("read every word of it as Spanish" in llm.seen[1]) == (lang == "Spanish")
+    assert ("read every word of it as Spanish" in llm.seen[0]) == (lang == "Spanish")
 
 
 def test_a_move_named_by_its_parameter_goes_to_the_interpreter():
@@ -647,7 +651,7 @@ def test_the_hint_goes_right_under_the_instruction(monkeypatch):
     llm = scripted({"understood": "u", "plan": []}, {"reply": "Listo."})
     ag.run("levantate del piso", lambda e: None, threading.Event(), llm=llm, tools={})
     assert "Instruction now (not done yet): levantate del piso\nREADS: the move 'lie_up'.\n(Write" in llm.seen[0]
-    assert "Instruction (now, not done yet): levantate del piso\nREADS: the move 'lie_up'." in llm.seen[1]
+    assert "Instruction: levantate del piso\nREADS: the move 'lie_up'." in llm.seen[1]
 
 
 # --------------------------------------------------------------------------- #
@@ -742,7 +746,38 @@ def test_the_same_words_again_are_said_to_be_asked_again():
     llm = scripted({"understood": "u", "plan": []}, {"reply": "Listo."})
     ag.run("Aplaudí", lambda e: None, threading.Event(), llm=llm, tools={}, history=[clap])
     assert "asked again now: do it again, it is not done yet" in llm.seen[0]
-    assert "asked again now: do it again" in llm.seen[1]
+    assert "do it once more — once" in llm.seen[1] and "not done yet" not in llm.seen[1]
     llm = scripted({"understood": "u", "plan": []}, {"reply": "Listo."})
     ag.run("Saludá", lambda e: None, threading.Event(), llm=llm, tools={}, history=[clap])
     assert "asked again" not in llm.seen[0]
+
+
+def test_the_same_call_that_worked_runs_no_more_times_than_the_plan_has_steps():
+    """"Otra vez" after a clap clapped six times, its plan one step long (2026-11-13)."""
+    clap = {"tool": "command", "args": {"move": "arm_action clap"}}
+    sent = []
+    tools = {"command": lambda a, e, s: sent.append(a) or {"ok": True}}
+    llm = scripted({"understood": "u", "plan": ["aplaudir"]}, clap, clap, clap, {"reply": "Listo."})
+    _events, emit = collect()
+    assert ag.run("otra vez", emit, threading.Event(), llm=llm, tools=tools) == "Listo."
+    assert len(sent) == 1
+    assert "already worked 1 time(s)" in llm.seen[3] and "Reply now" in llm.seen[3]
+
+
+def test_twice_in_the_plan_is_twice():
+    clap = {"tool": "command", "args": {"move": "arm_action clap"}}
+    sent = []
+    tools = {"command": lambda a, e, s: sent.append(a) or {"ok": True}}
+    llm = scripted({"understood": "u", "plan": ["aplaudir", "aplaudir otra vez"]},
+                   clap, clap, clap, {"reply": "Listo."})
+    ag.run("aplaudí dos veces", lambda e: None, threading.Event(), llm=llm, tools=tools)
+    assert len(sent) == 2
+
+
+def test_a_call_that_failed_may_be_tried_again():
+    look = {"tool": "look", "args": {"question": "¿qué ves?"}}
+    sent = []
+    tools = {"look": lambda a, e, s: sent.append(a) or {"ok": len(sent) > 1}}
+    llm = scripted({"understood": "u", "plan": ["mirar"]}, look, look, {"reply": "Veo una mesa."})
+    ag.run("¿qué ves?", lambda e: None, threading.Event(), llm=llm, tools=tools)
+    assert len(sent) == 2

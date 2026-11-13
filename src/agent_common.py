@@ -69,7 +69,8 @@ TOOLS = {
                             "'around' is 180)"},
         "does": "Walks the robot by itself, going round obstacles and people, up to 10 m. MOVES "
                 "THE ROBOT. Give a target it can see, or go and metres, and/or turn and "
-                "degrees; e.g. 'girá a la izquierda' is {\"turn\": \"left\", \"degrees\": 90}. If "
+                "degrees; e.g. 'girá a la izquierda' is {\"turn\": \"left\", \"degrees\": 90} and "
+                "'date vuelta' (turn round) {\"turn\": \"around\"}. If "
                 "the target is not in sight, turn and look first. The result says how far it "
                 "really went and turned: a walk that failed may have moved part of the way, so "
                 "never do it again whole.",
@@ -253,7 +254,7 @@ STEP_SYSTEM = (
     "{{\"thought\": why, \"tool\": a tool name, \"args\": {{...}}}} to use a tool, or\n"
     "{{\"thought\": why, \"reply\": what to tell the person}} when it is done, impossible, or "
     "only needed words. Never claim something worked unless a tool result says so. Never do a "
-    "step of THIS instruction again once it worked (the steps after \"Instruction (now\"): once "
+    "step of THIS instruction again once it worked (the steps after \"Instruction:\"): once "
     "they show it is done, reply. What earlier instructions did does not count. "
     "Reply in the "
     "language of the instruction, short and plain, as the robot, in your own words: never "
@@ -881,28 +882,41 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
     # "relajate" stood the robot up instead of saying safe mode holds damping back (2026-11-13).
     hint = move_hint(instruction).strip()
     said = f"{instruction}\n{hint}" if hint else instruction
-    if asked_before(instruction, history):
-        # The same words as an earlier turn: the 4B copied that turn's answer and did nothing
-        # (a second "Aplaudí", 6 of 6, 2026-11-13). Said to it, it does it again.
-        said += ("\n(This was asked earlier too, and is asked again now: do it again, it is not "
-                 "done yet.)")
+    # The same words as an earlier turn: the 4B copied that turn's answer and did nothing (a
+    # second "Aplaudí", 6 of 6, 2026-11-13). Said to it, it does it again — ONCE: told "not done
+    # yet" at every step, it did it six times.
+    again = asked_before(instruction, history)
+    plan_said = said + ("\n(This was asked earlier too, and is asked again now: do it again, it "
+                        "is not done yet.)" if again else "")
+    step_said = said + ("\n(Asked earlier too, and again now: do it once more — once; the steps "
+                        "below say whether it is done.)" if again else "")
     # Said last, where the reply is written: "I can't clap right now" answered "Aplaudí"
     # (2026-11-12) with the prompt's "in the language of the instruction" far above it.
     import vlm_common as vc
     language = "English" if vc.asked_in_english(instruction) else "Spanish"
-    lang = f"\n(Any reply must be in {language}.)"
+    # Read as Spanish, word by word: "date la vuelta" (turn round) was read as the English
+    # "date" and answered with today's date, typed twice (2026-11-13).
+    read_as = ("" if language == "English" else
+               " The instruction is in Spanish as spoken in Argentina: read every word of it as "
+               "Spanish, never as English. Its commands carry the pronoun at the end (\"date\" "
+               "is darse, \"movete\" moverse): read them as those verbs.")
+    lang = f"\n(Any reply must be in {language}.{read_as})"
     # The plan too: written in English it lost the idiom — "chocá los cinco" became "clap five
     # times" and "date vuelta" "the return date" (2026-11-13).
     plan = llm(PLAN_SYSTEM.format(tools=_tools_text()),
-               f"{earlier}Instruction now (not done yet): {said}\n(Write understood and the plan in "
-               f"{language}, keeping what the words mean where they are said.)")
+               f"{earlier}Instruction now (not done yet): {plan_said}\n(Write understood and the plan in "
+               f"{language}, keeping what the words mean where they are said.{read_as})")
     understood = str(plan.get("understood") or instruction)
     steps = [str(s) for s in plan.get("plan") or [] if str(s).strip()]
     emit({"type": "understood", "text": understood})
     if steps:
         emit({"type": "plan", "steps": steps})
-    steps_so_far = [f"Instruction (now, not done yet): {said}", f"Understood: {understood}",
+    steps_so_far = [f"Instruction: {step_said}", f"Understood: {understood}",
                     f"Plan: {'; '.join(steps) or '(none)'}"]
+    # The same call that worked, as many times as the plan has steps at most: "otra vez" after a
+    # clap clapped six times, its plan one step long (2026-11-13). "Aplaudí dos veces" plans two.
+    worked: dict[str, int] = {}
+    most = max(1, len(steps))
     for _ in range(max_steps):
         if stop.is_set():
             break
@@ -921,12 +935,21 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
                            f"or reply.")
             emit({"type": "error", "text": f"no tool '{name}'"})
             continue
+        call = json.dumps([name, args], ensure_ascii=False, sort_keys=True)
+        if worked.get(call, 0) >= most:
+            steps_so_far.append(f"Not done again: {name}({json.dumps(args, ensure_ascii=False)}) "
+                                f"already worked {worked[call]} time(s) for this instruction, as "
+                                f"many as the plan has steps. Reply now.")
+            emit({"type": "error", "text": f"{name} already done for this instruction"})
+            continue
         emit({"type": "tool", "tool": name, "args": args})
         try:
             result = tools[name](args, emit, stop)
         except Exception as exc:                 # the trace says it, the model is told
             result = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         emit({"type": "tool_result", "tool": name, "result": result})
+        if result.get("ok"):
+            worked[call] = worked.get(call, 0) + 1
         steps_so_far.append(f"Used {name}({json.dumps(args, ensure_ascii=False)}) -> "
                        f"{json.dumps(result, ensure_ascii=False)}")
     # The last words are the model's too, in the instruction's language; the fixed text is only
