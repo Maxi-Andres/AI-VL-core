@@ -253,7 +253,8 @@ STEP_SYSTEM = (
     "{{\"thought\": why, \"tool\": a tool name, \"args\": {{...}}}} to use a tool, or\n"
     "{{\"thought\": why, \"reply\": what to tell the person}} when it is done, impossible, or "
     "only needed words. Never claim something worked unless a tool result says so. Never do a "
-    "step again that already worked: once the results show the instruction is done, reply. "
+    "step of THIS instruction again once it worked (the steps after \"Instruction (now\"): once "
+    "they show it is done, reply. What earlier instructions did does not count. "
     "Reply in the "
     "language of the instruction, short and plain, as the robot, in your own words: never "
     "repeat or echo what the person said. The instruction comes from speech-to-text and may "
@@ -281,8 +282,24 @@ def history_text(history, budget=HISTORY_CHARS):
         blocks.append(block)
     if not blocks:
         return ""
-    return ("Earlier in this conversation (context only, oldest first; do NOT do any of it "
-            "again):\n" + "\n".join(reversed(blocks)) + "\n\n")
+    # Finished, and only context: "do NOT do any of it again" made a second "Aplaudí" answer
+    # "Aplaudí" and clap no more (2026-11-13). Asked again, it is done again.
+    return ("Earlier in this conversation (finished turns, oldest first; context only, e.g. "
+            "for what \"it\" means — none of it is to be carried out now, but an instruction "
+            "now that asks for the same thing again is done again):\n"
+            + "\n".join(reversed(blocks)) + "\n\n")
+
+
+def asked_before(instruction, history):
+    """Whether an earlier turn asked the very same words (case, accents and punctuation aside)."""
+    import unicodedata
+
+    def plain(text):
+        text = unicodedata.normalize("NFKD", str(text or "")).lower()
+        return " ".join("".join(c if c.isalnum() else " " for c in text
+                                if not unicodedata.combining(c)).split())
+    now = plain(instruction)
+    return bool(now) and any(plain((t or {}).get("question")) == now for t in history or [])
 
 
 def llm_json(system, user, url=LLAMACPP_HOST, max_tokens=300, image_b64=None):
@@ -864,6 +881,11 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
     # "relajate" stood the robot up instead of saying safe mode holds damping back (2026-11-13).
     hint = move_hint(instruction).strip()
     said = f"{instruction}\n{hint}" if hint else instruction
+    if asked_before(instruction, history):
+        # The same words as an earlier turn: the 4B copied that turn's answer and did nothing
+        # (a second "Aplaudí", 6 of 6, 2026-11-13). Said to it, it does it again.
+        said += ("\n(This was asked earlier too, and is asked again now: do it again, it is not "
+                 "done yet.)")
     # Said last, where the reply is written: "I can't clap right now" answered "Aplaudí"
     # (2026-11-12) with the prompt's "in the language of the instruction" far above it.
     import vlm_common as vc
@@ -872,14 +894,14 @@ def _run(instruction, emit, stop=None, llm=llm_json, tools=None, max_steps=MAX_S
     # The plan too: written in English it lost the idiom — "chocá los cinco" became "clap five
     # times" and "date vuelta" "the return date" (2026-11-13).
     plan = llm(PLAN_SYSTEM.format(tools=_tools_text()),
-               f"{earlier}Instruction now: {said}\n(Write understood and the plan in "
+               f"{earlier}Instruction now (not done yet): {said}\n(Write understood and the plan in "
                f"{language}, keeping what the words mean where they are said.)")
     understood = str(plan.get("understood") or instruction)
     steps = [str(s) for s in plan.get("plan") or [] if str(s).strip()]
     emit({"type": "understood", "text": understood})
     if steps:
         emit({"type": "plan", "steps": steps})
-    steps_so_far = [f"Instruction: {said}", f"Understood: {understood}",
+    steps_so_far = [f"Instruction (now, not done yet): {said}", f"Understood: {understood}",
                     f"Plan: {'; '.join(steps) or '(none)'}"]
     for _ in range(max_steps):
         if stop.is_set():

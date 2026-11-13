@@ -486,8 +486,9 @@ def test_the_conversation_so_far_goes_with_every_call_to_the_model(earlier, now)
     for told in llm.seen:                    # the plan, and every step
         assert earlier["question"] in told and earlier["answer"] in told
         assert earlier["done"][0] in told
-        assert "do NOT do any of it again" in told
-    assert f"Instruction now: {now}\n(Write understood and the plan in " in llm.seen[0]
+        assert "none of it is to be carried out now" in told
+        assert "asks for the same thing again is done again" in told
+    assert f"Instruction now (not done yet): {now}\n(Write understood and the plan in " in llm.seen[0]
 
 
 def test_without_a_conversation_no_earlier_turns_are_told():
@@ -495,8 +496,8 @@ def test_without_a_conversation_no_earlier_turns_are_told():
     llm = scripted({"understood": "hi", "plan": []}, {"reply": "hola"})
     ag.run("hola", emit, llm=llm, tools={}, history=[])
     assert "Earlier in this conversation" not in llm.seen[0]
-    assert "Instruction now: hola\n(Write understood and the plan in Spanish" in llm.seen[0]
-    assert "Instruction: hola" in llm.seen[1]
+    assert "Instruction now (not done yet): hola\n(Write understood and the plan in Spanish" in llm.seen[0]
+    assert "Instruction (now, not done yet): hola" in llm.seen[1]
 
 
 def test_only_the_newest_turns_that_fit_go_and_empty_ones_are_skipped():
@@ -645,8 +646,8 @@ def test_the_hint_goes_right_under_the_instruction(monkeypatch):
     monkeypatch.setattr(ag, "move_hint", lambda instruction: "READS: the move 'lie_up'.\n\n")
     llm = scripted({"understood": "u", "plan": []}, {"reply": "Listo."})
     ag.run("levantate del piso", lambda e: None, threading.Event(), llm=llm, tools={})
-    assert "Instruction now: levantate del piso\nREADS: the move 'lie_up'.\n(Write" in llm.seen[0]
-    assert "Instruction: levantate del piso\nREADS: the move 'lie_up'." in llm.seen[1]
+    assert "Instruction now (not done yet): levantate del piso\nREADS: the move 'lie_up'.\n(Write" in llm.seen[0]
+    assert "Instruction (now, not done yet): levantate del piso\nREADS: the move 'lie_up'." in llm.seen[1]
 
 
 # --------------------------------------------------------------------------- #
@@ -731,3 +732,17 @@ def test_safe_mode_s_moves_are_never_read_again():
     asked = []
     hint = ag.move_hint("relajate", interpret=lambda w, m: asked.append(1) or {"skill": "damp"})
     assert "safe mode holds it back" in hint and len(asked) == 1
+
+
+def test_the_same_words_again_are_said_to_be_asked_again():
+    """A second "Aplaudí" copied the first one's answer and clapped no more (2026-11-13, 6/6)."""
+    clap = {"question": "Aplaudí", "answer": "¡Listo!", "done": ["command(...) -> ok"]}
+    assert ag.asked_before("aplaudi!", [clap]) and ag.asked_before("  APLAUDÍ ", [clap])
+    assert not ag.asked_before("aplaudí de nuevo", [clap]) and not ag.asked_before("x", [])
+    llm = scripted({"understood": "u", "plan": []}, {"reply": "Listo."})
+    ag.run("Aplaudí", lambda e: None, threading.Event(), llm=llm, tools={}, history=[clap])
+    assert "asked again now: do it again, it is not done yet" in llm.seen[0]
+    assert "asked again now: do it again" in llm.seen[1]
+    llm = scripted({"understood": "u", "plan": []}, {"reply": "Listo."})
+    ag.run("Saludá", lambda e: None, threading.Event(), llm=llm, tools={}, history=[clap])
+    assert "asked again" not in llm.seen[0]
