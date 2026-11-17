@@ -21,7 +21,10 @@ RECORDED="${WAKEWORD_RECORDED:-$HOME/.pilot/wakeword}"
 IMAGE=aivl-wakeword:1
 
 run() {
-    docker run --rm --gpus all --shm-size=8g \
+    # WAKEWORD_CPU=1: no GPU (while the app holds it) — slower, same result.
+    local gpu=(--gpus all)
+    [ "${WAKEWORD_CPU:-0}" = 1 ] && gpu=()
+    docker run --rm "${gpu[@]}" --shm-size=8g \
         -u "$(id -u):$(id -g)" -e HOME=/work/home -e HF_HOME=/work/hf \
         -e PYTHONPATH=/work/src/openWakeWord \
         -e TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 \

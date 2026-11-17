@@ -3,12 +3,10 @@
 model_name: "bender"
 target_phrase:
   - "bender"
-# Spanish words the G1's mic and Whisper confused with the name (2026-10-19 and 2026-11-17):
-# trained AS NOT THE NAME, next to the English ones openWakeWord makes up by sound.
+# Spanish words near the name, trained AS NOT THE NAME next to the English ones openWakeWord
+# makes up by sound. NOT "vender"/"vendé"/"vende": in Spanish b and v sound the same, so those
+# ARE "Bender" — the first model (2026-11-17) was taught the name was not the name.
 custom_negative_phrases:
-  - "vender"
-  - "vendé"
-  - "vende"
   - "prendé"
   - "venga"
   - "ven acá"
@@ -43,5 +41,6 @@ batch_n_per_class:
 model_type: "dnn"
 layer_size: 32
 steps: 50000
-max_negative_weight: 1500
+# 1500 (openWakeWord's default) left the first model recognising 7 % of its own test "Bender"s.
+max_negative_weight: 500
 target_false_positives_per_hour: 0.2
