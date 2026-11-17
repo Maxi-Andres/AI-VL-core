@@ -1,0 +1,47 @@
+# openWakeWord training config for "Bender" (see openWakeWord examples/custom_model.yml for every
+# key). Paths are inside the container: /work = ~/wakeword, /recorded = ~/.pilot/wakeword.
+model_name: "bender"
+target_phrase:
+  - "bender"
+# Spanish words the G1's mic and Whisper confused with the name (2026-10-19 and 2026-11-17):
+# trained AS NOT THE NAME, next to the English ones openWakeWord makes up by sound.
+custom_negative_phrases:
+  - "vender"
+  - "vendé"
+  - "vende"
+  - "prendé"
+  - "venga"
+  - "ven acá"
+  - "bien"
+  - "bienvenido"
+  - "bandera"
+  - "tender"
+  - "pender"
+n_samples: 20000
+n_samples_val: 2000
+tts_batch_size: 50
+augmentation_batch_size: 16
+piper_sample_generator_path: "/work/src/piper-sample-generator"
+output_dir: "/work/models"
+rir_paths:
+  - "/work/data/mit_rirs"
+# The G1's own mic (fans, the room, the robot walking) first: the noise "Bender" must be found in.
+background_paths:
+  - "/work/data/g1_background"
+  - "/work/data/audioset_16k"
+background_paths_duplication_rate:
+  - 4
+  - 1
+false_positive_validation_data_path: "/work/data/validation_set_features.npy"
+augmentation_rounds: 1
+feature_data_files:
+  "ACAV100M_sample": "/work/data/openwakeword_features_ACAV100M_2000_hrs_16bit.npy"
+batch_n_per_class:
+  "ACAV100M_sample": 1024
+  "adversarial_negative": 50
+  "positive": 50
+model_type: "dnn"
+layer_size: 32
+steps: 50000
+max_negative_weight: 1500
+target_false_positives_per_hour: 0.2
