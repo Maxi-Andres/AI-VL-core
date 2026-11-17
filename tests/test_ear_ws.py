@@ -21,8 +21,11 @@ import service  # noqa: E402
 @pytest.fixture
 def client(monkeypatch):
     said = iter(["Bender, ¿qué ves?", "otra cosa"])
-    monkeypatch.setattr(service.asr_common, "transcribe",
-                        lambda wav, language=None: {"text": next(said, "")})
+
+    def transcribe(wav, language=None, hotwords="Bender"):
+        # Without the hotword (the ear's check of the name) it still hears the name.
+        return {"text": next(said, "") if hotwords else "Bender, qué ves"}
+    monkeypatch.setattr(service.asr_common, "transcribe", transcribe)
     monkeypatch.setenv("IACORE_WARM_UP", "0")
     with TestClient(service.app) as c:
         yield c
@@ -45,7 +48,8 @@ def test_muted_audio_is_never_transcribed(client, monkeypatch):
     """Catches: the robot answering its own voice — the browser mutes the ear while it speaks."""
     calls = []
     monkeypatch.setattr(service.asr_common, "transcribe",
-                        lambda wav, language=None: calls.append(1) or {"text": "Bender, eco"})
+                        lambda wav, language=None, hotwords=None:
+                        calls.append(1) or {"text": "Bender, eco"})
     with client.websocket_connect("/ws/ear") as ws:
         ws.send_text(json.dumps({"type": "mute", "on": True}))
         _send(ws, noise(1.0) + tone(1.0, 0.08) + noise(1.2))

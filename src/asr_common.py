@@ -154,7 +154,10 @@ def whisper_available():
 # --------------------------------------------------------------------------- #
 # Transcription
 # --------------------------------------------------------------------------- #
-def transcribe(data, language=None, translate=False):
+_DEFAULT = object()
+
+
+def transcribe(data, language=None, translate=False, hotwords=_DEFAULT):
     """Transcribe raw audio BYTES into text and return a small result dict.
 
     `data`      : the audio file bytes exactly as the browser recorded them
@@ -164,6 +167,8 @@ def transcribe(data, language=None, translate=False):
     `language`  : force a language code (e.g. "es"/"en"); None => auto-detect
                   (falls back to ASR_LANGUAGE from the env when set).
     `translate` : when True, use Whisper's translate task (any language -> English).
+    `hotwords`  : the names to steer it to (default ASR_HOTWORDS); None: none — the ear
+                  checks a heard "Bender" that way (ear_common.NAME_EDITS).
 
     Returns: {text, language, elapsed} (elapsed in wall seconds). Raises on a genuine
     decode/inference error (the caller turns it into an HTTP error).
@@ -175,8 +180,9 @@ def transcribe(data, language=None, translate=False):
     # transcribe() accepts a binary file-like object; wrap the bytes in BytesIO so
     # nothing touches disk. `segments` is a generator that runs the model lazily as
     # it is consumed, so joining it is what actually does the work.
+    words = ASR_HOTWORDS if hotwords is _DEFAULT else hotwords
     segments, info = model.transcribe(io.BytesIO(data), language=lang, task=task,
-                                      hotwords=ASR_HOTWORDS, vad_filter=ASR_VAD)
+                                      hotwords=words, vad_filter=ASR_VAD)
     text = "".join(seg.text for seg in segments).strip()
     elapsed = time.perf_counter() - t0
     return {

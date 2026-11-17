@@ -120,6 +120,45 @@ def test_the_name_in_the_middle_of_a_conversation_is_not_a_call():
     assert ec.wake_command("Bender") == (True, "")
 
 
+# Recorded on the G1 2026-11-17 with nobody saying the name: (with the hotword, without it).
+HEARD_ON_THE_G1 = [
+    ("Bender", "No, no."), ("Bender", "¡Ay!"), ("Bender", "Gracias."),
+    ("Bender", "¡Adiós! ¡Adiós! ¡Adiós!"), ("Bender Bender", "Sí, sí, sí, sí, sí."),
+    ("Bender", "Hola, hola, hola."), ("Bender", "en el lito de la inglesa"), ("Bender", "Ahí va."),
+    ("Bender", "Ay, ¿no?"), ("Bender", "Here I am."), ("Bender", "Deja de ver con un... Baby."),
+    ("Bender Bender Bender", "¿No? ¿No? ¿No? ¿No?"), ("Bender", "Amén."),
+    ("Bender", "¡Hasta la próxima!"), ("Bender", "Ayo, ayo, ayo."), ("Bender", "No."),
+]
+
+
+@pytest.mark.parametrize("with_hotword, without", HEARD_ON_THE_G1)
+def test_a_name_the_hotword_made_up_does_not_wake_it(with_hotword, without):
+    """Catches (2026-11-17): "muuu", "washa wiwi", "no" — anything not a word — came out "Bender"
+    with the hotword, woke the robot, and the agent ran what followed ("Parado." four times)."""
+    ear = ec.Ear(lambda wav: with_hotword, clock=Clock(), confirm=lambda wav: without)
+    events = feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2))
+    assert "wake" not in [e["type"] for e in events]
+    assert {"type": "not the name", "text": without} in events
+
+
+@pytest.mark.parametrize("without", ["¡Bender!", "Bénder", "Vender", "Bendel", "Bender, saludá"])
+def test_the_name_heard_again_without_the_hotword_wakes_it(without):
+    ear = ec.Ear(lambda wav: "Bender", clock=Clock(), confirm=lambda wav: without)
+    events = feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2))
+    assert events[-1] == {"type": "wake"}
+
+
+def test_a_made_up_name_does_not_cut_the_robot_off_either():
+    ear = ec.Ear(lambda wav: "bla bla Bender", clock=Clock(), confirm=lambda wav: "bla bla no")
+    ear.mute(True, barge=True)
+    assert feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2)) == []
+
+
+def test_sounds_like_name():
+    assert ec.sounds_like_name("¡Bénder!") and ec.sounds_like_name("vende")
+    assert not ec.sounds_like_name("venga") and not ec.sounds_like_name("Amén.")
+
+
 def test_every_command_says_what_was_heard_and_why_it_counts():
     # So a turn shows whether the name was really said (2026-11-17: "nadie dijo Bender").
     clock = Clock()

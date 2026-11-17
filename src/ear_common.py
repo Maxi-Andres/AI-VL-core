@@ -31,6 +31,7 @@ import math
 import re
 import struct
 import time
+import unicodedata
 
 RATE = 16000
 FRAME = 480                       # 30 ms
@@ -55,6 +56,14 @@ WAKE = re.compile(r"\bb[eé]nd[eé]r\b", re.IGNORECASE)
 # "vendé", "vender" and "prendé" too (measured 2026-11-17), so a name in the middle of a room's
 # conversation ("hay que vender eso") woke the robot with nobody calling it.
 WAKE_LEAD_WORDS = 1
+# ...AND IT IS CHECKED WITHOUT THE HOTWORD. Steered to "Bender", Whisper writes it for almost
+# anything that is not a real word: recorded on the G1 2026-11-17, with nobody saying the name,
+# 15 of 20 sounds ("muuu", "washa wiwi", "no", "gracias") came out "Bender" and woke it, and the
+# agent ran what followed. The same clips heard WITHOUT the hotword said "No.", "Amén.", "Hola,
+# hola"…; only 3 came near the name ("¡Bender!", "¡Bendel!", "¡Vender!"). So a heard name wakes
+# it only if that second hearing (`confirm`) has a word at most NAME_EDITS letters off "bender".
+NAME = "bender"
+NAME_EDITS = 2
 # The page answers a bare "Bender" with a spoken "¿Sí?" and does NOT mute the ear for it — muting
 # made the ear deaf for the ~2 s the acknowledgement took to make and play, and a question asked
 # right away was lost. So the ear hears its own "¿Sí?": alone it is ignored (the follow-up
@@ -119,7 +128,7 @@ def keep_events(folder, clock=time.time):
     os.makedirs(folder, mode=0o700, exist_ok=True)
 
     def keep(event):
-        if event.get("type") in ("wake", "command", "barge"):
+        if event.get("type") in ("wake", "command", "barge", "not the name"):
             with open(os.path.join(folder, "events.jsonl"), "a", encoding="utf-8") as f:
                 f.write(json.dumps({"at": round(clock(), 3), **event}, ensure_ascii=False) + "\n")
     return keep
@@ -195,6 +204,22 @@ def _after(text, end):
     return rest.strip()
 
 
+def _edits(a, b):
+    """Letters to change, add or drop to turn `a` into `b` (Levenshtein)."""
+    row = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        prev, row[0] = row[0], i
+        for j, cb in enumerate(b, 1):
+            prev, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, prev + (ca != cb))
+    return row[-1]
+
+
+def sounds_like_name(text):
+    """Whether `text` (heard without the hotword) has a word close to the name."""
+    plain = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode().lower()
+    return any(_edits(w, NAME) <= NAME_EDITS for w in re.findall(r"[a-z]+", plain))
+
+
 def wake_command(text):
     """(woke, command) for an utterance: does it start with "Bender" (WAKE_LEAD_WORDS), and what
     comes after it."""
@@ -234,8 +259,9 @@ class Ear:
                                            answer `text`, or with "" say "¿Sí?" as for a wake
     """
 
-    def __init__(self, transcribe, clock=time.monotonic, cut=lambda text: False):
+    def __init__(self, transcribe, clock=time.monotonic, cut=lambda text: False, confirm=None):
         self.transcribe = transcribe          # wav bytes -> text
+        self.confirm = confirm                # wav bytes -> text WITHOUT the hotword (or None)
         self.clock = clock
         self.cut = cut                        # text -> stopped mid-sentence? (turn_common)
         self.seg = Segmenter()
@@ -245,6 +271,7 @@ class Ear:
         self.awaiting_until = 0.0
         self.woke_on = ""                     # the utterance that opened the follow-up window
         self.held = None                      # a request cut off mid-sentence: {pcm, until, ...}
+        self.checked = ""                     # what the last name check heard
 
     def mute(self, on, barge=False):
         """`on` while the robot talks; `barge`: still listen for its name, to interrupt."""
@@ -281,11 +308,18 @@ class Ear:
         if not text or HALLUCINATIONS.search(text):
             return []
         woke, command = last_wake_command(text)
-        if not woke:
+        if not woke or not self._really_named(pcm):
             return []
         self.awaiting_until = 0.0 if command else self.clock() + FOLLOW_UP_S
         self.woke_on = text
         return [{"type": "heard", "text": text}, {"type": "barge", "text": command}]
+
+    def _really_named(self, pcm):
+        """A heard "Bender" heard again without the hotword (NAME_EDITS): the name, or not."""
+        if self.confirm is None:
+            return True
+        self.checked = (self.confirm(pcm_to_wav(pcm)) or "").strip()
+        return sounds_like_name(self.checked)
 
     def hear(self, pcm):
         # When the person STARTED talking: the follow-up window is for starting the question,
@@ -306,6 +340,9 @@ class Ear:
             return [_command(held)] if held else late
         events = [*late, {"type": "heard", "text": text}]
         woke, command = wake_command(text)
+        if woke and not held and not self._really_named(pcm):
+            woke = False                      # the hotword's "Bender", not the person's
+            events.append({"type": "not the name", "text": self.checked})
         request, via, said = "", "name", text
         if woke and command:
             request = command

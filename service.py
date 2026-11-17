@@ -820,7 +820,10 @@ async def ear(ws: WebSocket):
     def cut(text):
         return vlm_common.vlm_backend() == "llamacpp" and turn_common.looks_cut(text, vlm_url())
 
-    listener = ear_common.Ear(transcribe, cut=cut)
+    def confirm(wav):
+        return asr_common.transcribe(wav, language="es", hotwords=None)["text"]
+
+    listener = ear_common.Ear(transcribe, cut=cut, confirm=confirm)
     try:
         while True:
             msg = await ws.receive()
