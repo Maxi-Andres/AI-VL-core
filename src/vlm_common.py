@@ -479,6 +479,14 @@ DEFAULT_CONFIG = {
                  "fact": "your brother is Huesos, a Unitree Go2 robot dog"},
                 {"about": ["medis", "mides", "altura", "alto", "mide", "tall", "height"],
                  "fact": "you are 130 cm tall"},
+                # Its camera is in its head, looking ahead and down: its own hands are often in
+                # the frame, and "¿Qué te estoy mostrando?" got "dos brazos robóticos con manos
+                # articuladas" as if they were someone else's (2026-11-17). A fact, not the
+                # identity: in the identity it cost 17.84 kW (5/6 -> 1/6 right).
+                {"about": ["brazo", "mano", "dedo", "mostr", "ves", "viendo", "mira", "tenes",
+                           "arm", "hand", "finger", "show", "see", "looking"],
+                 "fact": "when robot arms or hands show at the edges of the picture, they are "
+                         "your own"},
             ],
         },
         "go2": {
