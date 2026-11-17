@@ -134,6 +134,46 @@ def keep_events(folder, clock=time.time):
     return keep
 
 
+class StreamRecorder:
+    """The mic as it came, unbroken, in WAV files of `chunk_s` in `folder`, and when the ear was
+    muted (the robot speaking) in `folder`/mutes.jsonl. With `recording`: a wake word is measured
+    in false wakes per HOUR of the place's real audio, which utterances alone do not give (they
+    are what the segmenter already chose). ~115 MB an hour. Off unless EAR_RECORD_DIR is set."""
+
+    def __init__(self, folder, chunk_s=600, clock=time.time):
+        import os
+        os.makedirs(folder, mode=0o700, exist_ok=True)
+        self.folder, self.chunk_s, self.clock = folder, chunk_s, clock
+        self.file, self.written = None, 0
+
+    def write(self, pcm):
+        import os
+        import wave
+        if self.file is None or self.written >= self.chunk_s * RATE * 2:
+            self.close()
+            name = time.strftime("%Y%m%d-%H%M%S", time.localtime(self.clock())) + ".wav"
+            # Kept open across writes on purpose: one WAV per chunk, closed by close().
+            self.file = wave.open(os.path.join(self.folder, name), "wb")  # noqa: SIM115
+            self.file.setnchannels(1)
+            self.file.setsampwidth(2)
+            self.file.setframerate(RATE)
+            self.written = 0
+        self.file.writeframes(pcm)
+        self.written += len(pcm)
+
+    def mute(self, on, barge):
+        import json
+        import os
+        with open(os.path.join(self.folder, "mutes.jsonl"), "a", encoding="utf-8") as f:
+            f.write(json.dumps({"at": round(self.clock(), 3), "muted": bool(on),
+                                "barge": bool(barge)}) + "\n")
+
+    def close(self):
+        if self.file is not None:
+            self.file.close()
+            self.file = None
+
+
 class Segmenter:
     """Cuts a PCM stream into utterances. push() returns the utterances it completed."""
 

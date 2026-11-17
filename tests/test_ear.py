@@ -331,6 +331,29 @@ def test_what_the_ear_decided_is_kept_next_to_the_recordings(tmp_path):
                                                "via": "name"}]
 
 
+def test_the_stream_is_kept_unbroken_in_chunks_with_when_it_was_muted(tmp_path):
+    """False wakes are counted per hour of the place's audio, not per chosen utterance."""
+    import json
+    import wave
+    t = [1763400000.0]
+    rec = ec.StreamRecorder(tmp_path / "stream", chunk_s=1, clock=lambda: t[0])
+    rec.write(tone(0.6, 0.05))
+    rec.mute(True, True)
+    rec.write(tone(0.6, 0.05))                     # 1.2 s: past the 1 s chunk
+    t[0] += 1.2
+    rec.write(tone(0.3, 0.05))                     # ...so this opens the next file
+    rec.close()
+    files = sorted((tmp_path / "stream").glob("*.wav"))
+    assert len(files) == 2
+    seconds = []
+    for f in files:
+        with wave.open(str(f)) as w:
+            seconds.append(w.getnframes() / ec.RATE)
+    assert seconds == pytest.approx([1.2, 0.3])
+    mutes = [json.loads(x) for x in (tmp_path / "stream" / "mutes.jsonl").read_text().splitlines()]
+    assert mutes == [{"at": 1763400000.0, "muted": True, "barge": True}]
+
+
 # --------------------------------------------------------------------------- #
 # A pause to think inside a sentence
 def cut_ear(*texts, clock):

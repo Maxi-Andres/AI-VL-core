@@ -813,10 +813,11 @@ async def ear(ws: WebSocket):
     def transcribe(wav):
         return asr_common.transcribe(wav, language="es")["text"]
 
-    keep = None
+    keep = stream = None
     if folder := os.environ.get("EAR_RECORD_DIR"):
         transcribe = ear_common.recording(transcribe, folder)
         keep = ear_common.keep_events(folder)
+        stream = ear_common.StreamRecorder(os.path.join(folder, "stream"))
     def cut(text):
         return vlm_common.vlm_backend() == "llamacpp" and turn_common.looks_cut(text, vlm_url())
 
@@ -830,6 +831,8 @@ async def ear(ws: WebSocket):
             if msg["type"] == "websocket.disconnect":
                 break
             if msg.get("bytes") is not None:
+                if stream is not None:
+                    stream.write(msg["bytes"])
                 # Transcription blocks for ~0.2 s: in a thread, so the event loop stays free.
                 for event in await run_in_threadpool(listener.feed, msg["bytes"]):
                     if keep is not None:
@@ -842,5 +845,10 @@ async def ear(ws: WebSocket):
                     continue
                 if isinstance(control, dict) and control.get("type") == "mute":
                     listener.mute(bool(control.get("on")), barge=bool(control.get("barge")))
+                    if stream is not None:
+                        stream.mute(control.get("on"), control.get("barge"))
     except WebSocketDisconnect:
         pass
+    finally:
+        if stream is not None:
+            stream.close()                    # the WAV's header gets its length
