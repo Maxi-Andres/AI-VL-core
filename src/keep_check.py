@@ -7,7 +7,8 @@ a note or a fact it sees. Why it exists (2026-11-17, during a demo): typed "que 
 was taken for "save the picture" and the robot answered "Listo, guardé la imagen en mi memoria."
 instead of saying what it saw; "que ves?" became "remember what you see". Typed messages have
 no accents, capitals or question marks, and the prompt's own example "¿Guardá lo que estás
-viendo?" pulled them in. 25/32 before the fix, 32/32 after.
+viendo?" pulled them in; then "de que color es el piso" and "cuanto marca el manometro" were
+kept as facts. The prompt now tells a question (always NO) from an order first: 44/44.
 
 Runs the code on disk against the llama-server the app runs (default :8081), so a prompt change
 is measured before the app is restarted:
@@ -29,12 +30,18 @@ CASES = [
     ("que guardaste?", None), ("te acordas del codigo?", None), ("mirá la mesa", None),
     ("hola", None), ("como estas?", None), ("que color es la silla", None),
     ("what are you looking at?", None), ("what do you see", None),
+    ("de que color es el piso", None), ("cuanto marca el manometro", None),
+    ("que temperatura marca", None), ("cuanto dice el display", None),
+    ("que hora marca el reloj", None), ("cuantas sillas hay", None),
+    ("how much does the gauge read?", None), ("es de madera el piso?", None),
     ("sacá una foto", "picture"), ("saca una foto", "picture"),
     ("guardá lo que estás viendo", "picture"), ("guarda esta imagen", "picture"),
     ("sacale una foto a la puerta", "picture"), ("¿podés sacar una foto?", "picture"),
-    ("take a picture", "picture"),
+    ("take a picture", "picture"), ("¿Sacá una foto?", "picture"),
+    ("registrá lo que estás viendo", "picture"),
     ("acordate que el codigo es 4455", "note"), ("anotá que mañana viene Juan", "note"),
     ("acordate de la temperatura del horno", "seen"), ("guardate este dato", "seen"),
+    ("anotá cuanto marca el manometro", "seen"), ("acordate de que la llave está abierta", "note"),
 ]
 
 

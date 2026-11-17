@@ -29,7 +29,10 @@ import requests
 
 KEEP = (
     "A person talks to a robot that has a camera. Does the message ask the robot to KEEP "
-    "something in its memory? PICTURE: it asks to take, save, register or keep a picture or what "
+    "something in its memory? First tell a QUESTION from an ORDER. A question asks the robot to "
+    "TELL something — what it sees, what something is, its color, how much a gauge or a screen "
+    "reads, how many there are, where it is — and is always NO: answering it keeps nothing. "
+    "Only an order to save, take, remember or note down is anything else. PICTURE: it asks to take, save, register or keep a picture or what "
     "the robot sees or is looking at. NOTE: it asks the robot to remember, note down or keep a "
     "fact given in words — answer NOTE: followed by that fact, in the person's words. SEEN: it "
     "asks to remember something whose value is only in what the robot sees (this, that, the "
@@ -62,6 +65,8 @@ EXAMPLES = [
     ("te acordas de la clave?", "NO"),
     ("mira eso", "NO"),
     ("¿Qué dice el cartel?", "NO"),
+    ("cuanto marca el termometro", "NO"),
+    ("de que color es la mesa", "NO"),
     ("Remember this number", "SEEN: this number"),
     ("What did you write down?", "NO"),
     ("¿Te acordás lo que marcaba?", "NO"),
