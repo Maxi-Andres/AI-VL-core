@@ -32,7 +32,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import ear_common  # noqa: E402
 
 RECORDED = Path.home() / ".pilot" / "wakeword"
-THRESHOLDS = [0.3, 0.5, 0.7, 0.9]
+THRESHOLDS = [0.05, 0.1, 0.2, 0.3, 0.5, 0.7]
 
 
 def clips(recorded: Path):
@@ -79,9 +79,14 @@ class OpenWakeWord:
         self.name = f"oww:{model_path.stem}"
         self.model = Model(wakeword_models=[str(model_path)], inference_framework="onnx")
 
-    def scores(self, pcm: np.ndarray) -> list[float]:
-        """The model's score for every 80 ms frame of `pcm`."""
+    def scores(self, pcm: np.ndarray, pad_s: float = 0.0) -> list[float]:
+        """The model's score for every 80 ms frame of `pcm`. `pad_s` of silence before and after
+        a short clip: the model answers only once its ~1 s of context is full, and a 1.3 s clip
+        ended before it heard the word in it (every score ~0.001, 2026-11-17)."""
         self.model.reset()
+        if pad_s:
+            pad = np.zeros(int(pad_s * 16000), dtype=np.int16)
+            pcm = np.concatenate([pad, pcm, pad])
         out = []
         for i in range(0, len(pcm) - 1279, 1280):
             out.append(float(next(iter(self.model.predict(pcm[i:i + 1280]).values()))))
@@ -136,7 +141,7 @@ def main() -> None:
         if detectors:
             pcm = read_pcm(path)
             for det in detectors:
-                best = max(det.scores(pcm) or [0.0])
+                best = max(det.scores(pcm, pad_s=1.5) or [0.0])
                 scores[det.name] = round(best, 4)
                 for th in THRESHOLDS:
                     woke[f"{det.name}@{th}"] = best >= th

@@ -11,6 +11,8 @@
 # container, and the recordings of the G1's mic (~/.pilot/wakeword) are /recorded, read-only.
 # The GPU is shared with the VLM server, which takes ~7 of its 8 GB: stop the app before
 # `generate` and `train` (they need the GPU), or they fail for lack of memory.
+# TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD: Piper's voice (en_US-libritts_r-medium.pt, rhasspy's own
+# GitHub release) is a whole pickled model, which PyTorch >= 2.6 refuses by default.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -22,6 +24,7 @@ run() {
     docker run --rm --gpus all --shm-size=8g \
         -u "$(id -u):$(id -g)" -e HOME=/work/home -e HF_HOME=/work/hf \
         -e PYTHONPATH=/work/src/openWakeWord \
+        -e TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 \
         -v "$WORK:/work" -v "$RECORDED:/recorded:ro" -v "$HERE:/tools:ro" \
         -w /work "$IMAGE" "$@"
 }
