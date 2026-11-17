@@ -715,6 +715,38 @@ def test_a_failed_walk_says_how_far_it_really_went_and_turned():
     assert "never do it again whole" in ag._tools_text()
 
 
+def test_a_walk_that_stopped_short_gives_the_rest_as_navigate_args():
+    """2026-11-17 on the robot: 1.1 m asked, 0.8 walked ("uncertain", 21 cm short), and the
+    agent walked the 1.1 m again. The result now carries the 0.3, ready for navigate."""
+    start = {"x": 0.0, "y": 0.0, "yaw": 0.0}
+    pose = {"x": 0.8, "y": 0.0, "yaw": math.radians(-7)}
+    goal = {"x": 1.1, "y": 0.0, "yaw": 0.0}
+    call = fake_walk_executor([{"state": "uncertain", "start": start, "pose": pose, "goal": goal,
+                                "error": {"pos_m": 0.3, "yaw_deg": 7.0},
+                                "reason": "it stopped getting closer 30 cm from the point"}])
+    out = ag.tool_navigate({"go": "forward", "metres": 1.1}, collect()[1], threading.Event(),
+                           call=call, poll_s=0)
+    assert not out["ok"] and out["still_to_go"] == {"go": "forward", "metres": 0.3}
+    # what is left, in the robot's frame now: a goal to its right after it turned left
+    w = {"pose": {"x": 0.0, "y": 0.0, "yaw": math.pi / 2}, "goal": {"x": 0.5, "y": 0.0,
+                                                                     "yaw": 0.0}}
+    assert ag._still_to_go(w) == {"still_to_go": {"go": "right", "metres": 0.5,
+                                                  "turn": "right", "degrees": 90}}
+    # there already: nothing
+    assert ag._still_to_go({"pose": goal, "goal": goal}) == {}
+    assert "still_to_go" in ag._tools_text()
+
+
+def test_a_walk_that_arrived_gives_nothing_more_to_do():
+    goal = {"x": 1.0, "y": 0.0, "yaw": 0.0}
+    pose = {"x": 0.9, "y": 0.0, "yaw": 0.0}          # success at 10 cm: the relay's own call
+    call = fake_walk_executor([{"state": "success", "start": {"x": 0, "y": 0, "yaw": 0},
+                                "pose": pose, "goal": goal, "error": {"pos_m": 0.1, "yaw_deg": 0}}])
+    out = ag.tool_navigate({"go": "forward", "metres": 1}, collect()[1], threading.Event(),
+                           call=call, poll_s=0)
+    assert out["ok"] and "still_to_go" not in out
+
+
 def test_a_reading_the_link_cannot_send_is_read_again_among_what_it_can(monkeypatch):
     """"Chocá los cinco" read as the high five, which the relay leaves out; among what it sends,
     it is the app's high five clap."""

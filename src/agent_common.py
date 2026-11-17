@@ -73,7 +73,8 @@ TOOLS = {
                 "'date vuelta' (turn round) {\"turn\": \"around\"}. If "
                 "the target is not in sight, turn and look first. The result says how far it "
                 "really went and turned: a walk that failed may have moved part of the way, so "
-                "never do it again whole.",
+                "never do it again whole — when it stopped short, its still_to_go is the rest, "
+                "ready to give to navigate as it is.",
     },
     "command": {
         "args": {"move": "the move as the person said it, in their own words, copied (e.g. "
@@ -602,6 +603,36 @@ def _went(w):
     return {"went_m": round(went, 2), "turned": f"{abs(turned):.0f} deg {way}"}
 
 
+# What is left of a walk counts from here: closer than this, or turned this close, is arrived
+# (the relay's own WALK_POS_TOL and WALK_OK_YAW).
+STILL_TO_GO_M = 0.06
+STILL_TO_GO_DEG = 8.0
+
+
+def _still_to_go(w):
+    """The rest of a walk that stopped short, as navigate's own args, from where the robot stands
+    now: {"still_to_go": {...}}, or {} when it is there. 2026-11-17: told it went 0.8 of 1.1 m,
+    the agent walked the 1.1 m again; the number it needs is the 0.3."""
+    goal, pose = w.get("goal") or {}, w.get("pose") or {}
+    try:
+        gx, gy = goal["x"] - pose["x"], goal["y"] - pose["y"]
+        c, s = math.cos(pose["yaw"]), math.sin(pose["yaw"])
+        fwd, left = c * gx + s * gy, -s * gx + c * gy
+        dyaw = math.degrees(math.atan2(math.sin(goal["yaw"] - pose["yaw"]),
+                                       math.cos(goal["yaw"] - pose["yaw"])))
+    except (KeyError, TypeError):
+        return {}
+    rest = {}
+    if math.hypot(fwd, left) > STILL_TO_GO_M:
+        along = abs(fwd) >= abs(left)            # navigate walks one way at a time
+        way = (("forward" if fwd > 0 else "back") if along else
+               ("left" if left > 0 else "right"))
+        rest.update(go=way, metres=round(abs(fwd if along else left), 2))
+    if abs(dyaw) > STILL_TO_GO_DEG:
+        rest.update(turn="left" if dyaw > 0 else "right", degrees=round(abs(dyaw)))
+    return {"still_to_go": rest} if rest else {}
+
+
 def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
     """One walk to a point (the relay's Walk, on the robot), followed to its end. `stop` (the
     STOP button) cancels it on the robot. The limits are the relay's: a refusal comes back as
@@ -631,6 +662,7 @@ def _walk(tool, fwd, left, turn, emit, stop, call, poll_s):
                   "detail": w.get("reason") or (f"{err.get('pos_m', 0) * 100:.0f} cm and "
                                                 f"{abs(err.get('yaw_deg', 0)):.0f} deg off")})
             return {"ok": w.get("state") == "success", "state": w.get("state"), **_went(w),
+                    **({} if w.get("state") == "success" else _still_to_go(w)),
                     "off_cm": round(err.get("pos_m", 0) * 100) if err else None,
                     "off_deg": abs(err.get("yaw_deg", 0)) if err else None,
                     **({"reason": w["reason"]} if w.get("reason") else {})}
