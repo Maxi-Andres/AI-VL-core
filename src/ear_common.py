@@ -13,8 +13,9 @@ the voice assistant needs, Alexa-style:
      frames (with PREROLL_MS of audio before it, so the first syllable is kept), ends after
      END_SILENCE_MS of silence or at MAX_S, and is dropped with under MIN_VOICED_S of voice.
   2. EAR — sends each utterance to speech-to-text (Whisper with the "Bender" hotword and its
-     own VAD, asr_common) and looks for the wake word. "Bender, qué ves" is a command at once;
-     "Bender" alone waits up to FOLLOW_UP_S for the next utterance. A request that stops
+     own VAD, asr_common) and looks for the wake word AT THE START of what was said
+     (WAKE_LEAD_WORDS). "Bender, qué ves" is a command at once; "Bender" alone waits up to
+     FOLLOW_UP_S for the next utterance. Every command says what was heard and why it counted. A request that stops
      mid-sentence (`cut`, turn_common) is held HOLD_S for the rest, and heard again as one. Text that Whisper is
      known to invent from noise is dropped. While the robot itself speaks, the ear is MUTED
      (it would otherwise hear and answer itself), plus UNMUTE_GUARD_S after — except for its
@@ -49,6 +50,11 @@ HOLD_S = 2.0
 HOLD_GAP_S = 0.3                  # silence put between the two halves when they are heard again
 
 WAKE = re.compile(r"\bb[eé]nd[eé]r\b", re.IGNORECASE)
+# THE NAME OPENS WHAT IS SAID TO IT ("Bender, …", "Che Bender, …"), with at most this many words
+# before it. Whisper, told to spell "Bender" right (asr_common.ASR_HOTWORDS), writes it for
+# "vendé", "vender" and "prendé" too (measured 2026-11-17), so a name in the middle of a room's
+# conversation ("hay que vender eso") woke the robot with nobody calling it.
+WAKE_LEAD_WORDS = 1
 # The page answers a bare "Bender" with a spoken "¿Sí?" and does NOT mute the ear for it — muting
 # made the ear deaf for the ~2 s the acknowledgement took to make and play, and a question asked
 # right away was lost. So the ear hears its own "¿Sí?": alone it is ignored (the follow-up
@@ -102,6 +108,21 @@ def recording(transcribe, folder, clock=time.time):
                                 "text": text or ""}, ensure_ascii=False) + "\n")
         return text
     return heard
+
+
+def keep_events(folder, clock=time.time):
+    """With `recording`: what the ear made of each utterance — wake, command (with why it
+    counted), barge — in `folder`/events.jsonl, so a false wake can be found in the recordings
+    (2026-11-17: the robot took the room's talk and its own voice as instructions)."""
+    import json
+    import os
+    os.makedirs(folder, mode=0o700, exist_ok=True)
+
+    def keep(event):
+        if event.get("type") in ("wake", "command", "barge"):
+            with open(os.path.join(folder, "events.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps({"at": round(clock(), 3), **event}, ensure_ascii=False) + "\n")
+    return keep
 
 
 class Segmenter:
@@ -175,9 +196,10 @@ def _after(text, end):
 
 
 def wake_command(text):
-    """(woke, command) for an utterance: is "Bender" in it, and what comes after it."""
+    """(woke, command) for an utterance: does it start with "Bender" (WAKE_LEAD_WORDS), and what
+    comes after it."""
     m = WAKE.search(text or "")
-    if not m:
+    if not m or len(re.findall(r"\w+", text[:m.start()])) > WAKE_LEAD_WORDS:
         return False, ""
     return True, _after(text, m.end())
 
@@ -191,13 +213,23 @@ def last_wake_command(text):
     return True, _after(text, found[-1].end())
 
 
+def _command(held):
+    """The command event for a request that was held (a sentence cut off mid-way)."""
+    return {"type": "command", "text": held["request"], "heard": held["heard"],
+            "via": held["via"]}
+
+
 class Ear:
     """One listening session. feed() takes PCM and returns events for the browser:
 
       {"type": "speech"}                   someone started talking (for the UI)
       {"type": "heard", "text": ...}       what one utterance said (also when ignored)
       {"type": "wake"}                     "Bender" alone: say "¿Sí?", the next one is the command
-      {"type": "command", "text": ...}     the request to answer
+      {"type": "command", "text": ..., "heard": ..., "via": ...}
+                                           the request to answer, the whole utterance it came
+                                           in, and why it counts: "name" (said with it),
+                                           "after the name" (the follow-up), "held" (the rest
+                                           of a sentence cut off mid-way)
       {"type": "barge", "text": ...}       "Bender" while the robot talks: stop talking, then
                                            answer `text`, or with "" say "¿Sí?" as for a wake
     """
@@ -211,6 +243,7 @@ class Ear:
         self.barge = False
         self.unmuted_at = 0.0
         self.awaiting_until = 0.0
+        self.woke_on = ""                     # the utterance that opened the follow-up window
         self.held = None                      # a request cut off mid-sentence: {pcm, until, ...}
 
     def mute(self, on, barge=False):
@@ -233,7 +266,7 @@ class Ear:
             events += self.barge_in(utterance) if self.muted else self.hear(utterance)
         if self.held and self.clock() > self.held["until"] and self.seg.utterance is None:
             # Nothing more came: the request goes as it was said.
-            events.append({"type": "command", "text": self.held["request"]})
+            events.append(_command(self.held))
             self.held = None
         if self.seg.started:
             self.seg.started = False
@@ -251,6 +284,7 @@ class Ear:
         if not woke:
             return []
         self.awaiting_until = 0.0 if command else self.clock() + FOLLOW_UP_S
+        self.woke_on = text
         return [{"type": "heard", "text": text}, {"type": "barge", "text": command}]
 
     def hear(self, pcm):
@@ -266,26 +300,31 @@ class Ear:
             # the whole sentence ("…yo llevo" + "la notebook a la reunión").
             pcm = held["pcm"] + bytes(int(HOLD_GAP_S * RATE) * 2) + pcm
         elif held:                            # started after the wait: that one goes as it was
-            late, held = [{"type": "command", "text": held["request"]}], None
+            late, held = [_command(held)], None
         text = (self.transcribe(pcm_to_wav(pcm)) or "").strip()
         if not text or HALLUCINATIONS.search(text):
-            return [{"type": "command", "text": held["request"]}] if held else late
+            return [_command(held)] if held else late
         events = [*late, {"type": "heard", "text": text}]
         woke, command = wake_command(text)
-        request = ""
+        request, via, said = "", "name", text
         if woke and command:
             request = command
         elif woke:
             self.awaiting_until = self.clock() + FOLLOW_UP_S
+            self.woke_on = text
             events.append({"type": "wake"})
         elif began < self.awaiting_until or held:
             request = ACK_ECHO.sub("", text).strip()   # a bare "sí" is the robot's own ack
+            via = "held" if held else "after the name"
+            if not held:                      # "heard" says what opened the window, too
+                said = f"{self.woke_on} … {text}"
         if request:
             self.awaiting_until = 0.0
             # Asked on the words as heard: the request has lost its closing "?" (_after).
             if not held and self.cut(text):
                 # Once: a second pause gets what was said so far, not another wait.
-                self.held = {"pcm": pcm, "request": request, "until": self.clock() + HOLD_S}
+                self.held = {"pcm": pcm, "request": request, "until": self.clock() + HOLD_S,
+                             "heard": said, "via": via}
             else:
-                events.append({"type": "command", "text": request})
+                events.append({"type": "command", "text": request, "heard": said, "via": via})
         return events

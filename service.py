@@ -813,8 +813,10 @@ async def ear(ws: WebSocket):
     def transcribe(wav):
         return asr_common.transcribe(wav, language="es")["text"]
 
+    keep = None
     if folder := os.environ.get("EAR_RECORD_DIR"):
         transcribe = ear_common.recording(transcribe, folder)
+        keep = ear_common.keep_events(folder)
     def cut(text):
         return vlm_common.vlm_backend() == "llamacpp" and turn_common.looks_cut(text, vlm_url())
 
@@ -827,6 +829,8 @@ async def ear(ws: WebSocket):
             if msg.get("bytes") is not None:
                 # Transcription blocks for ~0.2 s: in a thread, so the event loop stays free.
                 for event in await run_in_threadpool(listener.feed, msg["bytes"]):
+                    if keep is not None:
+                        keep(event)
                     await ws.send_json(event)
             elif msg.get("text"):
                 try:

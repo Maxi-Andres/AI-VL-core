@@ -48,6 +48,11 @@ def feed_timed(ear, pcm, clock):
     return events
 
 
+def cmd(event):
+    """A command event without what it was heard in (tested on its own below)."""
+    return {k: v for k, v in event.items() if k not in ("heard", "via")}
+
+
 class Clock:
     def __init__(self):
         self.t = 100.0
@@ -101,7 +106,32 @@ def test_a_click_is_not_an_utterance():
 def test_bender_then_the_request_is_a_command_at_once():
     ear, _ = ear_saying("Bender, ¿qué ves?")
     events = feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2))
-    assert events[-1] == {"type": "command", "text": "qué ves"}
+    assert cmd(events[-1]) == {"type": "command", "text": "qué ves"}
+
+
+def test_the_name_in_the_middle_of_a_conversation_is_not_a_call():
+    """Catches (2026-11-17): with "Bender" as Whisper's hotword, "hay que vender eso" comes out
+    as "hay que Bender eso", and the robot took the room's talk as instructions."""
+    for said in ("hay que Bender eso", "¿Por qué? Nos parecía infinito, Bender, hay que hacer un piquete"):
+        ear, _ = ear_saying(said)
+        events = feed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.2))
+        assert [e["type"] for e in events] == ["speech", "heard"], said
+    assert ec.wake_command("Che Bender, saludá") == (True, "saludá")
+    assert ec.wake_command("Bender") == (True, "")
+
+
+def test_every_command_says_what_was_heard_and_why_it_counts():
+    # So a turn shows whether the name was really said (2026-11-17: "nadie dijo Bender").
+    clock = Clock()
+    ear, _ = ear_saying("Bender, saludá", "Bender.", "date la vuelta", clock=clock)
+    events = feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2))
+    assert events[-1] == {"type": "command", "text": "saludá", "heard": "Bender, saludá",
+                          "via": "name"}
+    feed(ear, tone(0.6, 0.08) + noise(1.2))
+    clock.t += 2.0
+    events = feed(ear, tone(1.0, 0.08) + noise(1.2))
+    assert events[-1] == {"type": "command", "text": "date la vuelta",
+                          "heard": "Bender. … date la vuelta", "via": "after the name"}
 
 
 def test_bender_alone_waits_for_the_next_utterance():
@@ -111,7 +141,7 @@ def test_bender_alone_waits_for_the_next_utterance():
     assert first[-1] == {"type": "wake"}
     clock.t += 2.0
     second = feed(ear, tone(1.5, 0.08) + noise(1.2))
-    assert second[-1] == {"type": "command", "text": "caminá un metro para adelante"}
+    assert cmd(second[-1]) == {"type": "command", "text": "caminá un metro para adelante"}
 
 
 def test_the_robots_own_si_is_not_the_question():
@@ -125,7 +155,7 @@ def test_the_robots_own_si_is_not_the_question():
     assert [e["type"] for e in echo] == ["speech", "heard"]          # still waiting
     clock.t += 1.0
     asked = feed(ear, tone(1.5, 0.08) + noise(1.2))
-    assert asked[-1] == {"type": "command", "text": "qué ves?"}
+    assert cmd(asked[-1]) == {"type": "command", "text": "qué ves?"}
 
 
 def test_a_request_that_starts_with_si_word_is_kept():
@@ -134,7 +164,7 @@ def test_a_request_that_starts_with_si_word_is_kept():
     feed(ear, noise(1.0) + tone(0.6, 0.08) + noise(1.2))
     clock.t += 1.0
     asked = feed(ear, tone(1.5, 0.08) + noise(1.2))
-    assert asked[-1] == {"type": "command", "text": "siempre hay alguien en la puerta?"}
+    assert cmd(asked[-1]) == {"type": "command", "text": "siempre hay alguien en la puerta?"}
 
 
 def test_the_follow_up_window_closes():
@@ -155,7 +185,7 @@ def test_a_long_question_started_in_time_is_answered():
     feed(ear, noise(1.0) + tone(0.6, 0.08) + noise(1.2))
     clock.t += ec.FOLLOW_UP_S - 1.0               # starts talking 1 s before the window closes
     events = feed_timed(ear, tone(5.0, 0.08) + noise(1.2), clock)   # 6 s: ends 5 s late
-    assert events[-1] == {"type": "command", "text": "qué elemento de la tabla periódica tiene 73 protones"}
+    assert cmd(events[-1]) == {"type": "command", "text": "qué elemento de la tabla periódica tiene 73 protones"}
 
 
 def test_talk_without_the_name_is_heard_but_not_obeyed():
@@ -177,7 +207,7 @@ def test_whispers_inventions_are_dropped(invented):
 def test_a_real_sentence_with_thanks_in_it_is_kept():
     ear, _ = ear_saying("Bender, gracias por la ayuda")
     events = feed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2))
-    assert events[-1] == {"type": "command", "text": "gracias por la ayuda"}
+    assert cmd(events[-1]) == {"type": "command", "text": "gracias por la ayuda"}
 
 
 
@@ -209,7 +239,7 @@ def test_saying_the_name_cuts_the_robot_off():
     clock.t += ec.UNMUTE_GUARD_S + 0.1
     ear.transcribe = lambda wav: "¿y la de la izquierda?"
     events = feed(ear, tone(1.0, 0.08) + noise(1.2))
-    assert events[-1] == {"type": "command", "text": "¿y la de la izquierda?"}, "the ¿Sí? window opened"
+    assert cmd(events[-1]) == {"type": "command", "text": "¿y la de la izquierda?"}, "the ¿Sí? window opened"
 
 
 def test_a_question_said_over_the_robot_is_answered_next():
@@ -251,6 +281,17 @@ def test_recording_keeps_each_utterance_and_what_was_heard(tmp_path):
     assert (tmp_path / "ear" / line["wav"]).read_bytes() == wav
 
 
+def test_what_the_ear_decided_is_kept_next_to_the_recordings(tmp_path):
+    import json
+    keep = ec.keep_events(tmp_path / "ear", clock=lambda: 1763400000.5)
+    keep({"type": "heard", "text": "hola"})                     # in heard.jsonl already
+    keep({"type": "command", "text": "saludá", "heard": "Bender, saludá", "via": "name"})
+    lines = (tmp_path / "ear" / "events.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(x) for x in lines] == [{"at": 1763400000.5, "type": "command",
+                                               "text": "saludá", "heard": "Bender, saludá",
+                                               "via": "name"}]
+
+
 # --------------------------------------------------------------------------- #
 # A pause to think inside a sentence
 def cut_ear(*texts, clock):
@@ -273,7 +314,7 @@ def test_a_sentence_cut_by_a_pause_is_heard_whole():
     first = feed_timed(ear, noise(1.0) + tone(2.0, 0.08) + noise(1.0), clock)
     assert "command" not in [e["type"] for e in first], "held, not sent"
     rest = feed_timed(ear, tone(1.5, 0.08) + noise(1.2), clock)
-    assert rest[-1] == {"type": "command", "text": "acordate de que yo llevo la notebook a la reunión"}
+    assert cmd(rest[-1]) == {"type": "command", "text": "acordate de que yo llevo la notebook a la reunión"}
     assert heard[1] > heard[0] + ec.HOLD_GAP_S * ec.RATE * 2, "both halves transcribed together"
 
 
@@ -283,7 +324,7 @@ def test_a_cut_request_that_never_goes_on_is_sent_as_it_was():
     first = feed_timed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.0), clock)
     assert "command" not in [e["type"] for e in first]
     later = feed_timed(ear, noise(ec.HOLD_S + 0.5), clock)
-    assert later == [{"type": "command", "text": "acordate de que"}]
+    assert [cmd(e) for e in later] == [{"type": "command", "text": "acordate de que"}]
 
 
 def test_talk_after_the_wait_does_not_lose_the_held_request():
@@ -293,7 +334,7 @@ def test_talk_after_the_wait_does_not_lose_the_held_request():
     clock.t += ec.HOLD_S + 1.0                # silence the ear did not get packets for
     later = feed_timed(ear, tone(1.5, 0.08) + noise(1.2), clock)
     commands = [e for e in later if e["type"] == "command"]
-    assert commands == [{"type": "command", "text": "acordate de que"}], "the late talk is not a request"
+    assert [cmd(e) for e in commands] == [{"type": "command", "text": "acordate de que"}], "the late talk is not a request"
 
 
 def test_a_finished_request_does_not_wait():
@@ -301,7 +342,7 @@ def test_a_finished_request_does_not_wait():
     asked = []
     ear = ec.Ear(lambda wav: "Bender, ¿qué ves?", clock=clock, cut=lambda t: asked.append(t) or False)
     events = feed_timed(ear, noise(1.0) + tone(1.0, 0.08) + noise(1.2), clock)
-    assert events[-1] == {"type": "command", "text": "qué ves"}
+    assert cmd(events[-1]) == {"type": "command", "text": "qué ves"}
     assert asked == ["Bender, ¿qué ves?"], "judged on the words as heard, closing mark and all"
 
 
@@ -310,4 +351,4 @@ def test_a_second_pause_sends_what_was_said_so_far():
     ear, _ = cut_ear("Bender, acordate de que", "Bender, acordate de que yo llevo", clock=clock)
     feed_timed(ear, noise(1.0) + tone(1.5, 0.08) + noise(1.0), clock)
     rest = feed_timed(ear, tone(1.0, 0.08) + noise(1.2), clock)
-    assert rest[-1] == {"type": "command", "text": "acordate de que yo llevo"}
+    assert cmd(rest[-1]) == {"type": "command", "text": "acordate de que yo llevo"}
