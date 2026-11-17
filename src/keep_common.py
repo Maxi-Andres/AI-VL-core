@@ -40,7 +40,9 @@ KEEP = (
     "A question that asks for information — what it sees, what it saved, what was said, what a "
     "value was or is — is NO, even when it mentions a picture, a reading or remembering. Speech "
     "recognition also puts question marks on orders ('¿Sacá una foto?' is still an order): judge "
-    "the words, not the punctuation. Answer only PICTURE, SEEN: <what>, NOTE: <fact>, ASK, or NO.")
+    "the words, not the punctuation. Typed messages often have no accents, capitals or question "
+    "marks: 'que estas viendo' is the question '¿qué estás viendo?' (NO). Looking at something "
+    "is not keeping it. Answer only PICTURE, SEEN: <what>, NOTE: <fact>, ASK, or NO.")
 EXAMPLES = [
     ("Sacá una foto de la puerta", "PICTURE"),
     ("Acordate que el código del portón es 4455", "NOTE: el código del portón es 4455"),
@@ -56,6 +58,9 @@ EXAMPLES = [
     ("Guardate este dato", "SEEN: este dato"),
     ("No la guardes", "NO"),
     ("¿Guardá lo que estás viendo?", "PICTURE"),
+    ("que estas mirando", "NO"),
+    ("te acordas de la clave?", "NO"),
+    ("mira eso", "NO"),
     ("¿Qué dice el cartel?", "NO"),
     ("Remember this number", "SEEN: this number"),
     ("What did you write down?", "NO"),
